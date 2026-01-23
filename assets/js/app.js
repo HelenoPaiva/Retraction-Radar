@@ -1,9 +1,13 @@
 // assets/js/app.js
+// Retraction Radar – OpenAlex + Crossref + PubMed (NCBI)
 
 // Global state
 let currentFilter = "all";
 let currentStudies = [];        // all rows for current analysis
 let lastAnalyzedDoi = "";       // used for CSV filename
+
+// PubMed config
+const PUBMED_API_KEY = "7d653c3573d4967a70f644df87ffbd392708";
 
 // -------------------- Small helpers --------------------
 
@@ -13,8 +17,8 @@ function $(id) {
 
 function setStatus(message, isError = false) {
   const el = $("status");
-  el.textContent = message || "";
   if (!el) return;
+  el.textContent = message || "";
   el.classList.toggle("error", !!isError);
 }
 
@@ -43,6 +47,17 @@ function mapStatusToTag(status) {
       return statusTag("OK", "status-tag--clean");
   }
 }
+
+// severity ranking when combining Crossref + PubMed
+const STATUS_SEVERITY = {
+  retracted: 5,
+  expression_of_concern: 4,
+  withdrawn: 4,
+  corrected: 3,
+  ok: 2,
+  no_doi: 1,
+  unknown: 1,
+};
 
 // -------------------- OpenAlex --------------------
 
@@ -122,7 +137,7 @@ function determineRetractionStatusFromCrossref(message) {
   }
 
   if (status === "ok" && notes.length === 0) {
-    notes.push("No retraction/correction signals found in Crossref updates.");
+    notes.push("Crossref: no retraction/correction signals found.");
   }
 
   return {
@@ -131,7 +146,7 @@ function determineRetractionStatusFromCrossref(message) {
   };
 }
 
-async function getRetractionInfoForDoi(doi) {
+async function getCrossrefRetractionInfoForDoi(doi) {
   try {
     const message = await fetchCrossrefForDoi(doi);
     return determineRetractionStatusFromCrossref(message);
@@ -139,9 +154,143 @@ async function getRetractionInfoForDoi(doi) {
     console.error("Error checking Crossref", doi, err);
     return {
       status: "unknown",
-      notes: "Error querying Crossref: " + err.message,
+      notes: "Crossref error: " + err.message,
     };
   }
+}
+
+// -------------------- PubMed via NCBI E-utilities --------------------
+
+// 1) find PubMed ID (PMID) from DOI
+async function fetchPubMedIdForDoi(doi) {
+  const term = `${doi.trim()}[DOI]`;
+  const url =
+    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi" +
+    `?db=pubmed&retmode=json&term=${encodeURIComponent(term)}` +
+    `&api_key=${encodeURIComponent(PUBMED_API_KEY)}`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`PubMed esearch error for DOI ${doi}: ${res.status}`);
+  }
+  const json = await res.json();
+  const ids = (json.esearchresult && json.esearchresult.idlist) || [];
+  if (!ids.length) return null;
+  return ids[0]; // first PMID
+}
+
+// 2) get summary for that PMID and inspect publication types
+async function fetchPubMedSummaryForPmid(pmid) {
+  const url =
+    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi" +
+    `?db=pubmed&retmode=json&id=${encodeURIComponent(pmid)}` +
+    `&api_key=${encodeURIComponent(PUBMED_API_KEY)}`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`PubMed esummary error for PMID ${pmid}: ${res.status}`);
+  }
+  const json = await res.json();
+  if (!json.result || !json.result[pmid]) {
+    throw new Error(`PubMed esummary: missing result for PMID ${pmid}`);
+  }
+  return json.result[pmid];
+}
+
+// Basic mapping of pubtype strings → status
+function determineRetractionStatusFromPubMedSummary(pmid, summary) {
+  const pubtypes = summary.pubtype || [];
+  const pubtypesLower = pubtypes.map((p) => String(p).toLowerCase());
+  let status = "ok";
+  const notes = [];
+
+  for (const pt of pubtypesLower) {
+    if (pt.includes("retracted publication")) {
+      status = "retracted";
+      notes.push("PubMed: publication type = Retracted Publication.");
+      break;
+    }
+    if (pt.includes("retraction of publication")) {
+      // This is usually the *notice*, but for our purpose it's a strong signal.
+      status = "retracted";
+      notes.push("PubMed: publication type = Retraction of Publication.");
+      break;
+    }
+    if (pt.includes("expression of concern")) {
+      status = "expression_of_concern";
+      notes.push("PubMed: publication type = Expression of Concern.");
+      break;
+    }
+    if (pt.includes("erratum") || pt.includes("corrigendum") || pt.includes("correction")) {
+      status = "corrected";
+      notes.push("PubMed: publication type indicates correction/erratum.");
+      // keep looking in case something more severe appears, but usually enough
+    }
+  }
+
+  if (status === "ok" && notes.length === 0) {
+    notes.push("PubMed: no retraction-related publication types.");
+  }
+
+  return {
+    status,
+    notes: notes.join(" "),
+    pmid,
+  };
+}
+
+async function getPubMedRetractionInfoForDoi(doi) {
+  try {
+    const pmid = await fetchPubMedIdForDoi(doi);
+    if (!pmid) {
+      return {
+        status: "ok",
+        notes: "PubMed: no record found for this DOI.",
+        pmid: null,
+      };
+    }
+    const summary = await fetchPubMedSummaryForPmid(pmid);
+    return determineRetractionStatusFromPubMedSummary(pmid, summary);
+  } catch (err) {
+    console.error("Error checking PubMed", doi, err);
+    return {
+      status: "unknown",
+      notes: "PubMed error: " + err.message,
+      pmid: null,
+    };
+  }
+}
+
+// -------------------- Combine Crossref + PubMed --------------------
+
+function pickMoreSevereStatus(aStatus, bStatus) {
+  const a = STATUS_SEVERITY[aStatus] ?? 0;
+  const b = STATUS_SEVERITY[bStatus] ?? 0;
+  return a >= b ? aStatus : bStatus;
+}
+
+async function getCombinedRetractionInfoForDoi(doi) {
+  // run in sequence to avoid hammering too hard
+  const crossrefInfo = await getCrossrefRetractionInfoForDoi(doi);
+  const pubmedInfo = await getPubMedRetractionInfoForDoi(doi);
+
+  const combinedStatus = pickMoreSevereStatus(
+    crossrefInfo.status,
+    pubmedInfo.status
+  );
+
+  const combinedNotes = [
+    crossrefInfo.notes || "",
+    pubmedInfo.notes || "",
+    pubmedInfo.pmid ? `PubMed PMID: ${pubmedInfo.pmid}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    status: combinedStatus,
+    notes: combinedNotes,
+  };
 }
 
 // -------------------- Core workflow --------------------
@@ -199,7 +348,7 @@ async function analyzeDoi(doiRaw) {
   }
 
   setStatus(
-    `Found ${referenced.length} referenced works in OpenAlex. Fetching metadata and retraction status…`
+    `Found ${referenced.length} referenced works in OpenAlex. Fetching metadata and retraction status (Crossref + PubMed)…`
   );
 
   const maxRefs = 200;
@@ -219,7 +368,7 @@ async function analyzeDoi(doiRaw) {
       let retractionStatus = { status: "no_doi", notes: "No DOI available." };
 
       if (refDoi) {
-        retractionStatus = await getRetractionInfoForDoi(refDoi);
+        retractionStatus = await getCombinedRetractionInfoForDoi(refDoi);
       }
 
       const study = {
@@ -236,7 +385,7 @@ async function analyzeDoi(doiRaw) {
 
       if (index % 10 === 0) {
         setStatus(
-          `Checked ${index}/${truncated.length} references… still working.`
+          `Checked ${index}/${truncated.length} references… still working (Crossref + PubMed).`
         );
       }
     } catch (err) {
@@ -279,11 +428,11 @@ async function analyzeDoi(doiRaw) {
 
   if (counts.retracted > 0 || counts.expression_of_concern > 0) {
     setStatus(
-      `Finished. Found ${counts.retracted} retracted and ${counts.expression_of_concern} with expression of concern among ${counts.total} cited works.`
+      `Finished. Found ${counts.retracted} retracted and ${counts.expression_of_concern} with expression of concern among ${counts.total} cited works (Crossref + PubMed).`
     );
   } else {
     setStatus(
-      `Finished. No retracted or EoC signals detected via Crossref among ${counts.total} cited works. Always double-check manually.`
+      `Finished. No retracted or EoC signals detected via Crossref/PubMed among ${counts.total} cited works. Always double-check manually.`
     );
   }
 }
