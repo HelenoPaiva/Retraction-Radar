@@ -5,120 +5,430 @@
   <title>Retraction Radar</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Inter -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-page: #f3f4f6;       /* light gray background */
+      --bg-card: #ffffff;       /* white cards */
+      --border-soft: #e5e7eb;   /* soft border */
+      --text-main: #111827;     /* almost-black text */
+      --text-muted: #6b7280;    /* muted gray */
+      --accent: #047857;        /* emerald-ish accent */
+      --accent-soft: #ecfdf5;   /* pale emerald */
+      --pill-bg: #f3f4f6;
+      --pill-border: #d1d5db;
+      --pill-active-bg: #047857;
+      --pill-active-text: #f9fafb;
+      --pill-active-border: #065f46;
+      --link: #2563eb;
+      --link-hover: #1d4ed8;
+      --font-main: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+                   Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    }
 
-  <!-- Tailwind -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Inter', 'system-ui', 'sans-serif'],
-          },
-        }
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-main);
+      background: var(--bg-page);
+      color: var(--text-main);
+    }
+
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+    a:hover {
+      color: var(--link-hover);
+      text-decoration: underline;
+    }
+
+    .page {
+      max-width: 960px;
+      margin: 32px auto;
+      padding: 0 16px 32px;
+    }
+
+    header.page-header {
+      margin-bottom: 20px;
+    }
+
+    .page-title {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin: 0 0 4px;
+      letter-spacing: -0.02em;
+    }
+
+    .page-subtitle {
+      margin: 0 0 8px;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .page-meta {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .page-meta span {
+      margin-right: 6px;
+    }
+
+    .page-meta a {
+      font-weight: 500;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      padding: 16px 16px 12px;
+      margin-bottom: 16px;
+    }
+
+    /* DOI form */
+
+    .doi-form {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .doi-form-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+    }
+
+    .doi-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #4b5563;
+    }
+
+    #doiInput {
+      width: 100%;
+      font-size: 0.9rem;
+      padding: 7px 9px;
+      border-radius: 6px;
+      border: 1px solid #d1d5db;
+      background: #ffffff;
+      color: var(--text-main);
+    }
+
+    #doiInput:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(4, 120, 87, 0.2);
+    }
+
+    .doi-actions {
+      display: flex;
+      flex-direction: row;
+      gap: 8px;
+      align-items: flex-end;
+    }
+
+    #analyzeBtn {
+      border: none;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #f9fafb;
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 8px 16px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #analyzeBtn:hover {
+      background: #065f46;
+    }
+
+    #analyzeBtn:disabled {
+      background: #9ca3af;
+      cursor: default;
+    }
+
+    @media (min-width: 640px) {
+      .doi-form {
+        flex-direction: row;
+        align-items: flex-end;
+      }
+
+      .doi-form-row {
+        margin-right: 4px;
+      }
+
+      .doi-actions {
+        align-items: center;
       }
     }
-  </script>
+
+    /* Status text */
+
+    #status {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      margin-bottom: 4px;
+    }
+
+    /* Meta info */
+
+    #metaInfo {
+      font-size: 0.8rem;
+      color: #374151;
+      background: #f9fafb;
+      border-radius: 6px;
+      border: 1px solid var(--border-soft);
+      padding: 8px 10px;
+      margin: 8px 0 12px;
+    }
+
+    #metaInfo div + div {
+      margin-top: 2px;
+    }
+
+    #metaInfo span.label {
+      font-weight: 600;
+    }
+
+    /* Summary pills */
+
+    #summaryWrapper {
+      margin: 0 0 12px;
+    }
+
+    #summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .pill {
+      font-size: 0.75rem;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: var(--pill-bg);
+      border: 1px solid var(--pill-border);
+      color: #374151;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pill-count {
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pill-label {
+      text-transform: none;
+    }
+
+    .pill.active {
+      background: var(--pill-active-bg);
+      border-color: var(--pill-active-border);
+      color: var(--pill-active-text);
+    }
+
+    /* Table */
+
+    .table-card {
+      padding-top: 0;
+    }
+
+    .table-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-soft);
+      margin-bottom: 4px;
+    }
+
+    .table-header h2 {
+      font-size: 0.9rem;
+      margin: 0;
+      font-weight: 600;
+    }
+
+    .table-note {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.75rem;
+    }
+
+    thead {
+      background: #f9fafb;
+      border-bottom: 1px solid var(--border-soft);
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 6px 8px;
+      vertical-align: top;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    th {
+      font-weight: 600;
+      color: #4b5563;
+      white-space: nowrap;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #fafafa;
+    }
+
+    tbody tr:hover {
+      background: #f1f5f9;
+    }
+
+    .status-tag {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-size: 0.7rem;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+      color: #374151;
+    }
+
+    .status-tag--retracted {
+      border-color: #b91c1c;
+      background: #fef2f2;
+      color: #991b1b;
+      font-weight: 600;
+    }
+
+    .status-tag--eoc {
+      border-color: #b45309;
+      background: #fffbeb;
+      color: #92400e;
+      font-weight: 600;
+    }
+
+    .status-tag--clean {
+      border-color: #059669;
+      background: #ecfdf5;
+      color: #047857;
+    }
+
+    .doi-link {
+      color: var(--link);
+      word-break: break-all;
+    }
+
+    .footer-note {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+  </style>
 </head>
+<body>
+  <div class="page">
 
-<body class="bg-slate-100 text-slate-900 font-sans">
-  <main class="min-h-screen flex flex-col">
-
-    <!-- Header (Anesthesia Calendar / TOC style) -->
-    <header class="bg-slate-900 text-slate-100 shadow">
-      <div class="max-w-5xl mx-auto px-4 py-5">
-        <h1 class="text-2xl font-semibold tracking-tight">Retraction Radar</h1>
-        <p class="mt-1 text-xs sm:text-sm text-slate-300 max-w-3xl">
-          Paste the DOI of a meta-analysis (or any article). References are retrieved and
-          screened for retraction or correction signals using OpenAlex and Crossref.
-        </p>
-      </div>
+    <header class="page-header">
+      <h1 class="page-title">Retraction Radar</h1>
+      <p class="page-subtitle">
+        An open, reproducible report of how cited articles are being updated (retractions, corrections, expressions of concern).
+      </p>
+      <p class="page-meta">
+        <span><a href="https://github.com/HelenoPaiva/OpenCitationTrajectory" target="_blank" rel="noopener noreferrer">View source on GitHub</a></span>
+        ·
+        <span>Paste any article DOI below to scan its reference list.</span>
+      </p>
     </header>
 
-    <section class="flex-1 max-w-5xl mx-auto px-4 py-6 space-y-4">
-
-      <!-- Input -->
-      <form id="doiForm" class="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <label class="flex-1">
-          <span class="block text-xs font-medium text-slate-700 mb-1">Article DOI</span>
+    <!-- Input + status -->
+    <section class="card">
+      <form id="doiForm" class="doi-form">
+        <div class="doi-form-row">
+          <label for="doiInput" class="doi-label">Article DOI</label>
           <input
             id="doiInput"
             type="text"
-            placeholder="10.1136/rapm-2024-105547"
-            class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm bg-white shadow-sm
-                   focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+            placeholder="10.xxxx/xxxxxx"
             required
           />
-        </label>
+        </div>
 
-        <button
-          id="analyzeBtn"
-          type="submit"
-          class="inline-flex items-center justify-center rounded-md bg-emerald-600
-                 px-4 py-2 text-sm font-medium text-white shadow-sm
-                 hover:bg-emerald-700 focus:outline-none focus:ring-2
-                 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-100">
-          Analyze
-        </button>
+        <div class="doi-actions">
+          <button id="analyzeBtn" type="submit">
+            Analyze
+          </button>
+        </div>
       </form>
 
-      <!-- Status -->
-      <div id="status" class="text-xs sm:text-sm text-slate-600"></div>
+      <div id="status"></div>
 
-      <!-- Meta info -->
-      <div id="metaInfo"
-           class="hidden border border-slate-200 rounded-md bg-white p-3 text-xs sm:text-sm space-y-1">
-        <div><span class="font-semibold">Title:</span> <span id="metaTitle"></span></div>
-        <div><span class="font-semibold">Year:</span> <span id="metaYear"></span></div>
-        <div><span class="font-semibold">DOI:</span> <span id="metaDoi"></span></div>
-        <div><span class="font-semibold">References with IDs:</span> <span id="metaRefCount"></span></div>
+      <div id="metaInfo" class="hidden">
+        <div><span class="label">Title:</span> <span id="metaTitle"></span></div>
+        <div><span class="label">Year:</span> <span id="metaYear"></span></div>
+        <div><span class="label">DOI:</span> <span id="metaDoi"></span></div>
+        <div><span class="label">References with IDs:</span> <span id="metaRefCount"></span></div>
       </div>
 
-      <!-- Summary pills (no instructions) -->
       <div id="summaryWrapper" class="hidden">
-        <div id="summary" class="flex flex-wrap gap-2 text-xs"></div>
-      </div>
-
-      <!-- Table -->
-      <div class="bg-white border border-slate-200 rounded-md shadow-sm overflow-hidden">
-        <div class="px-3 py-2 border-b border-slate-200 flex justify-between items-center">
-          <h2 class="text-xs sm:text-sm font-semibold text-slate-800">Cited references</h2>
-          <span class="text-[11px] text-slate-500">
-            Status derived from Crossref update metadata
-          </span>
-        </div>
-
-        <div class="overflow-x-auto">
-          <table class="min-w-full text-[11px] sm:text-xs text-left">
-            <thead class="bg-slate-50 border-b border-slate-200 text-slate-600">
-              <tr>
-                <th class="px-3 py-2">#</th>
-                <th class="px-3 py-2">Status</th>
-                <th class="px-3 py-2">Year</th>
-                <th class="px-3 py-2">Title</th>
-                <th class="px-3 py-2">DOI</th>
-                <th class="px-3 py-2">Notes</th>
-              </tr>
-            </thead>
-            <tbody id="resultsBody"></tbody>
-          </table>
-        </div>
+        <div id="summary"></div>
       </div>
     </section>
 
-    <!-- Footer -->
-    <footer class="border-t border-slate-200 bg-slate-50">
-      <div class="max-w-5xl mx-auto px-4 py-3 text-[11px] text-slate-500">
-        Data sources: OpenAlex · Crossref · Retraction Watch (via Crossref)
+    <!-- Table -->
+    <section class="card table-card">
+      <div class="table-header">
+        <h2>Cited references</h2>
+        <div class="table-note">
+          Status is derived from Crossref “update” metadata. Always verify manually.
+        </div>
       </div>
-    </footer>
 
-  </main>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Status</th>
+              <th>Year</th>
+              <th>Title</th>
+              <th>DOI</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+    </section>
 
-  <script src="assets/js/app.js" defer></script>
+    <div class="footer-note">
+      Data sources: OpenAlex · Crossref · Retraction Watch (via Crossref).
+    </div>
+  </div>
+
+  <script src="assets/js/app.js"></script>
 </body>
 </html>
+
