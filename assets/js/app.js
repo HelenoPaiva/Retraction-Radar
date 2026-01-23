@@ -1,6 +1,8 @@
 // assets/js/app.js
 
 let currentFilter = "all";
+let currentStudies = [];        // all rows for the current analysis
+let lastAnalyzedDoi = "";       // for CSV filename
 
 // --- Helpers ---------------------------------------------------------
 
@@ -138,20 +140,26 @@ async function getRetractionInfoForDoi(doi) {
 
 // --- Main workflow ---------------------------------------------------
 
-async function analyzeDoi(doi) {
+async function analyzeDoi(doiRaw) {
+  const doi = normalizeDoiInput(doiRaw);
+  lastAnalyzedDoi = doi || doiRaw.trim();
+
   const resultsBody = document.getElementById("resultsBody");
+  const exportBtn = document.getElementById("exportCsvBtn");
   resultsBody.innerHTML = "";
+  currentStudies = [];
   document.getElementById("metaInfo").classList.add("hidden");
   document.getElementById("summaryWrapper").classList.add("hidden");
   currentFilter = "all";
+  exportBtn.disabled = true;
 
   setStatus("Resolving DOI via OpenAlex…");
 
-  const work = await fetchOpenAlexWorkByDoi(doi);
+  const work = await fetchOpenAlexWorkByDoi(doi || doiRaw.trim());
 
   const title = work.display_name || "(no title)";
   const year = work.publication_year || "";
-  const workDoi = work.doi || doi;
+  const workDoi = work.doi || (doi || doiRaw.trim());
   const referenced = work.referenced_works || [];
 
   document.getElementById("metaTitle").textContent = title;
@@ -174,7 +182,6 @@ async function analyzeDoi(doi) {
 
   const maxRefs = 200;
   const truncated = referenced.slice(0, maxRefs);
-  const studies = [];
 
   let index = 0;
   for (const refId of truncated) {
@@ -202,7 +209,7 @@ async function analyzeDoi(doi) {
         notes: retractionStatus.notes,
       };
 
-      studies.push(study);
+      currentStudies.push(study);
       appendStudyRow(study);
 
       if (index % 10 === 0) {
@@ -220,13 +227,13 @@ async function analyzeDoi(doi) {
         status: "unknown",
         notes: "Error fetching OpenAlex work for this reference.",
       };
-      studies.push(study);
+      currentStudies.push(study);
       appendStudyRow(study);
     }
   }
 
   const counts = {
-    total: studies.length,
+    total: currentStudies.length,
     ok: 0,
     retracted: 0,
     expression_of_concern: 0,
@@ -236,7 +243,7 @@ async function analyzeDoi(doi) {
     unknown: 0,
   };
 
-  for (const s of studies) {
+  for (const s of currentStudies) {
     if (counts[s.status] !== undefined) {
       counts[s.status] += 1;
     } else {
@@ -246,6 +253,7 @@ async function analyzeDoi(doi) {
 
   renderSummary(counts);
   document.getElementById("summaryWrapper").classList.remove("hidden");
+  exportBtn.disabled = currentStudies.length === 0;
 
   if (counts.retracted > 0 || counts.expression_of_concern > 0) {
     setStatus(
@@ -277,7 +285,7 @@ function appendStudyRow(study) {
     <td>${study.year || "—"}</td>
     <td><div style="max-width: 320px; word-break: break-word;">${study.title}</div></td>
     <td>${doiLink}</td>
-    <td><div style="max-width: 320px; word-break: break-word; color:#6b7280;">${study.notes}</div></td>
+    <td><div style="max-width: 320px; word-break: break-word; color:#9ca3af;">${study.notes}</div></td>
   `;
 
   tbody.appendChild(tr);
@@ -364,12 +372,79 @@ function applyFilter(filter) {
   });
 }
 
+// --- CSV export ------------------------------------------------------
+
+function normalizeDoiInput(raw) {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  const doiPrefix = "10.";
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    const parts = trimmed.split("doi.org/");
+    if (parts.length > 1) {
+      return parts[1].trim();
+    }
+  }
+  // already plain DOI?
+  const idx = trimmed.indexOf(doiPrefix);
+  if (idx >= 0) {
+    return trimmed.slice(idx);
+  }
+  return trimmed;
+}
+
+function exportCurrentStudiesToCsv() {
+  if (!currentStudies.length) return;
+
+  const header = ["index", "status", "year", "title", "doi", "notes"];
+  const rows = [header];
+
+  currentStudies.forEach((s) => {
+    rows.push([
+      String(s.idx ?? ""),
+      s.status ?? "",
+      s.year != null ? String(s.year) : "",
+      s.title ?? "",
+      s.doi ?? "",
+      s.notes ?? "",
+    ]);
+  });
+
+  const csv = rows
+    .map((cols) =>
+      cols
+        .map((val) => {
+          const v = (val ?? "").replace(/"/g, '""');
+          return `"${v}"`;
+        })
+        .join(",")
+    )
+    .join("\r\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const safeDoi =
+    (lastAnalyzedDoi || "results")
+      .replace(/^https?:\/\//, "")
+      .replace(/[^a-zA-Z0-9._-]+/g, "_")
+      .slice(0, 80) || "results";
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `retraction-radar-${safeDoi}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // --- Wiring ----------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("doiForm");
   const input = document.getElementById("doiInput");
   const button = document.getElementById("analyzeBtn");
+  const exportBtn = document.getElementById("exportCsvBtn");
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -377,6 +452,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!doi) return;
 
     button.disabled = true;
+    exportBtn.disabled = true;
     setStatus("");
 
     try {
@@ -386,6 +462,11 @@ document.addEventListener("DOMContentLoaded", () => {
       setStatus("Error: " + err.message, true);
     } finally {
       button.disabled = false;
+      exportBtn.disabled = currentStudies.length === 0;
     }
+  });
+
+  exportBtn.addEventListener("click", () => {
+    exportCurrentStudiesToCsv();
   });
 });
