@@ -1,13 +1,32 @@
 // assets/js/app.js
-// Retraction Radar – OpenAlex + Crossref + PubMed (NCBI)
+// Retraction Radar – OpenAlex + Crossref + PubMed + Retraction Watch CSV
 
-// Global state
+// -------------------- Global state --------------------
+
 let currentFilter = "all";
 let currentStudies = [];        // all rows for current analysis
 let lastAnalyzedDoi = "";       // used for CSV filename
 
 // PubMed config
 const PUBMED_API_KEY = "7d653c3573d4967a70f644df87ffbd392708";
+
+// Retraction Watch CSV (live)
+const RW_CSV_URL =
+  "https://gitlab.com/crossref/retraction-watch-data/-/raw/main/retraction_watch.csv?ref_type=heads";
+
+// Promise<Set<string>> (normalized DOIs present in RW CSV)
+let rwIndexPromise = null;
+
+// severity ranking when combining all sources
+const STATUS_SEVERITY = {
+  retracted: 5,
+  expression_of_concern: 4,
+  withdrawn: 4,
+  corrected: 3,
+  ok: 2,
+  no_doi: 1,
+  unknown: 1,
+};
 
 // -------------------- Small helpers --------------------
 
@@ -48,16 +67,130 @@ function mapStatusToTag(status) {
   }
 }
 
-// severity ranking when combining Crossref + PubMed
-const STATUS_SEVERITY = {
-  retracted: 5,
-  expression_of_concern: 4,
-  withdrawn: 4,
-  corrected: 3,
-  ok: 2,
-  no_doi: 1,
-  unknown: 1,
-};
+function normalizeDoiForLookup(doi) {
+  if (!doi) return "";
+  return doi
+    .trim()
+    .replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")
+    .toLowerCase();
+}
+
+function pickMoreSevereStatus(aStatus, bStatus) {
+  const a = STATUS_SEVERITY[aStatus] ?? 0;
+  const b = STATUS_SEVERITY[bStatus] ?? 0;
+  return a >= b ? aStatus : bStatus;
+}
+
+// -------------------- CSV parsing for Retraction Watch --------------------
+
+// Simple CSV line parser that respects quotes and commas in quoted fields
+function parseCsvLine(line) {
+  const cols = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+
+    if (c === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        // Escaped quote
+        cur += '"';
+        i++; // skip next
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (c === "," && !inQuotes) {
+      cols.push(cur);
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  cols.push(cur);
+  return cols;
+}
+
+function parseRetractionWatchCsv(text) {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (!lines.length) return new Set();
+
+  const header = parseCsvLine(lines[0]);
+  const doiColIndex = header.findIndex((h) =>
+    h.trim().toLowerCase() === "doi" || h.toLowerCase().includes("doi")
+  );
+  if (doiColIndex === -1) {
+    console.warn("Retraction Watch CSV: DOI column not found in header");
+    return new Set();
+  }
+
+  const seen = new Set();
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    const cols = parseCsvLine(line);
+    if (doiColIndex >= cols.length) continue;
+    let doi = cols[doiColIndex] || "";
+    if (!doi) continue;
+
+    const norm = normalizeDoiForLookup(doi);
+    if (norm) seen.add(norm);
+  }
+
+  return seen;
+}
+
+function ensureRetractionWatchIndex() {
+  if (!rwIndexPromise) {
+    rwIndexPromise = fetch(RW_CSV_URL)
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(
+            "Retraction Watch CSV fetch failed: " + res.status
+          );
+        }
+        return res.text();
+      })
+      .then((text) => {
+        console.log("Retraction Watch CSV loaded");
+        return parseRetractionWatchCsv(text);
+      })
+      .catch((err) => {
+        console.error("Retraction Watch CSV error:", err);
+        // Fail soft: empty set means "no match"
+        return new Set();
+      });
+  }
+  return rwIndexPromise;
+}
+
+async function getRetractionWatchInfoForDoi(doi) {
+  const index = await ensureRetractionWatchIndex();
+  const key = normalizeDoiForLookup(doi);
+
+  if (!index.size) {
+    return {
+      status: "ok",
+      notes: "Retraction Watch CSV could not be loaded or was empty.",
+    };
+  }
+
+  if (index.has(key)) {
+    // RW dataset is a retraction index; treat presence as "retracted" signal
+    return {
+      status: "retracted",
+      notes:
+        "Retraction Watch CSV: DOI present in retraction_watch.csv (Crossref/Retraction Watch dataset).",
+    };
+  }
+
+  return {
+    status: "ok",
+    notes:
+      "Retraction Watch CSV: DOI not found in retraction_watch.csv (at time of query).",
+  };
+}
 
 // -------------------- OpenAlex --------------------
 
@@ -197,7 +330,6 @@ async function fetchPubMedSummaryForPmid(pmid) {
   return json.result[pmid];
 }
 
-// Basic mapping of pubtype strings → status
 function determineRetractionStatusFromPubMedSummary(pmid, summary) {
   const pubtypes = summary.pubtype || [];
   const pubtypesLower = pubtypes.map((p) => String(p).toLowerCase());
@@ -211,9 +343,8 @@ function determineRetractionStatusFromPubMedSummary(pmid, summary) {
       break;
     }
     if (pt.includes("retraction of publication")) {
-      // This is usually the *notice*, but for our purpose it's a strong signal.
       status = "retracted";
-      notes.push("PubMed: publication type = Retraction of Publication.");
+      notes.push("PubMed: publication type = Retraction of Publication (notice).");
       break;
     }
     if (pt.includes("expression of concern")) {
@@ -221,10 +352,15 @@ function determineRetractionStatusFromPubMedSummary(pmid, summary) {
       notes.push("PubMed: publication type = Expression of Concern.");
       break;
     }
-    if (pt.includes("erratum") || pt.includes("corrigendum") || pt.includes("correction")) {
-      status = "corrected";
+    if (
+      pt.includes("erratum") ||
+      pt.includes("corrigendum") ||
+      pt.includes("correction")
+    ) {
+      if (status === "ok") {
+        status = "corrected";
+      }
       notes.push("PubMed: publication type indicates correction/erratum.");
-      // keep looking in case something more severe appears, but usually enough
     }
   }
 
@@ -261,27 +397,24 @@ async function getPubMedRetractionInfoForDoi(doi) {
   }
 }
 
-// -------------------- Combine Crossref + PubMed --------------------
-
-function pickMoreSevereStatus(aStatus, bStatus) {
-  const a = STATUS_SEVERITY[aStatus] ?? 0;
-  const b = STATUS_SEVERITY[bStatus] ?? 0;
-  return a >= b ? aStatus : bStatus;
-}
+// -------------------- Combine all sources --------------------
 
 async function getCombinedRetractionInfoForDoi(doi) {
-  // run in sequence to avoid hammering too hard
-  const crossrefInfo = await getCrossrefRetractionInfoForDoi(doi);
-  const pubmedInfo = await getPubMedRetractionInfoForDoi(doi);
+  const [crossrefInfo, pubmedInfo, rwInfo] = await Promise.all([
+    getCrossrefRetractionInfoForDoi(doi),
+    getPubMedRetractionInfoForDoi(doi),
+    getRetractionWatchInfoForDoi(doi),
+  ]);
 
   const combinedStatus = pickMoreSevereStatus(
-    crossrefInfo.status,
-    pubmedInfo.status
+    pickMoreSevereStatus(crossrefInfo.status, pubmedInfo.status),
+    rwInfo.status
   );
 
   const combinedNotes = [
-    crossrefInfo.notes || "",
-    pubmedInfo.notes || "",
+    crossrefInfo.notes,
+    pubmedInfo.notes,
+    rwInfo.notes,
     pubmedInfo.pmid ? `PubMed PMID: ${pubmedInfo.pmid}.` : "",
   ]
     .filter(Boolean)
@@ -348,7 +481,7 @@ async function analyzeDoi(doiRaw) {
   }
 
   setStatus(
-    `Found ${referenced.length} referenced works in OpenAlex. Fetching metadata and retraction status (Crossref + PubMed)…`
+    `Found ${referenced.length} referenced works in OpenAlex. Fetching metadata and retraction status (Crossref + PubMed + Retraction Watch)…`
   );
 
   const maxRefs = 200;
@@ -385,7 +518,7 @@ async function analyzeDoi(doiRaw) {
 
       if (index % 10 === 0) {
         setStatus(
-          `Checked ${index}/${truncated.length} references… still working (Crossref + PubMed).`
+          `Checked ${index}/${truncated.length} references… still working (Crossref + PubMed + Retraction Watch).`
         );
       }
     } catch (err) {
@@ -428,11 +561,11 @@ async function analyzeDoi(doiRaw) {
 
   if (counts.retracted > 0 || counts.expression_of_concern > 0) {
     setStatus(
-      `Finished. Found ${counts.retracted} retracted and ${counts.expression_of_concern} with expression of concern among ${counts.total} cited works (Crossref + PubMed).`
+      `Finished. Found ${counts.retracted} retracted and ${counts.expression_of_concern} with expression of concern among ${counts.total} cited works (Crossref + PubMed + Retraction Watch).`
     );
   } else {
     setStatus(
-      `Finished. No retracted or EoC signals detected via Crossref/PubMed among ${counts.total} cited works. Always double-check manually.`
+      `Finished. No retracted or EoC signals detected via Crossref/PubMed/Retraction Watch among ${counts.total} cited works. Always double-check manually.`
     );
   }
 }
