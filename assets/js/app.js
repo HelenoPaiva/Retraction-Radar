@@ -1,39 +1,38 @@
 // assets/js/app.js
 
-// Global current filter
 let currentFilter = "all";
 
 // --- Helpers ---------------------------------------------------------
 
 function setStatus(message, isError = false) {
   const el = document.getElementById("status");
-  el.textContent = message;
-  el.className =
-    "text-xs sm:text-sm mt-1 " +
-    (isError ? "text-red-700" : "text-slate-600");
+  el.textContent = message || "";
+  el.classList.toggle("error", !!isError);
 }
 
-function badge(label, colorClasses) {
-  return `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${colorClasses}">${label}</span>`;
+function statusTag(label, extraClass) {
+  const cls = ["status-tag"];
+  if (extraClass) cls.push(extraClass);
+  return `<span class="${cls.join(" ")}">${label}</span>`;
 }
 
-function mapStatusToBadge(status) {
+function mapStatusToTag(status) {
   switch (status) {
     case "retracted":
-      return badge("RETRACTED", "bg-red-100 text-red-800 border border-red-200");
+      return statusTag("RETRACTED", "status-tag--retracted");
     case "expression_of_concern":
-      return badge("EXPRESSION OF CONCERN", "bg-amber-100 text-amber-800 border border-amber-200");
+      return statusTag("EXPRESSION OF CONCERN", "status-tag--eoc");
     case "corrected":
-      return badge("CORRECTED / ERRATUM", "bg-blue-100 text-blue-800 border border-blue-200");
+      return statusTag("CORRECTED / ERRATUM", "status-tag--clean");
     case "withdrawn":
-      return badge("WITHDRAWN", "bg-rose-100 text-rose-800 border border-rose-200");
+      return statusTag("WITHDRAWN", "status-tag--eoc");
     case "no_doi":
-      return badge("NO DOI", "bg-slate-100 text-slate-700 border border-slate-200");
+      return statusTag("NO DOI", "status-tag--no-doi");
     case "unknown":
-      return badge("UNKNOWN", "bg-slate-100 text-slate-700 border border-slate-200");
+      return statusTag("UNKNOWN", "status-tag--unknown");
     case "ok":
     default:
-      return badge("OK", "bg-emerald-100 text-emerald-800 border border-emerald-200");
+      return statusTag("OK", "status-tag--clean");
   }
 }
 
@@ -78,7 +77,7 @@ async function fetchCrossrefForDoi(doi) {
 
 function determineRetractionStatusFromCrossref(message) {
   let status = "ok";
-  let notes = [];
+  const notes = [];
 
   const updateTo = message["update-to"] || message["update_to"] || [];
   if (Array.isArray(updateTo) && updateTo.length > 0) {
@@ -142,8 +141,8 @@ async function getRetractionInfoForDoi(doi) {
 async function analyzeDoi(doi) {
   const resultsBody = document.getElementById("resultsBody");
   resultsBody.innerHTML = "";
-  document.getElementById("summaryWrapper").classList.add("hidden");
   document.getElementById("metaInfo").classList.add("hidden");
+  document.getElementById("summaryWrapper").classList.add("hidden");
   currentFilter = "all";
 
   setStatus("Resolving DOI via OpenAlex…");
@@ -173,7 +172,7 @@ async function analyzeDoi(doi) {
     `Found ${referenced.length} referenced works in OpenAlex. Fetching metadata and retraction status…`
   );
 
-  const maxRefs = 200; // safety cap
+  const maxRefs = 200;
   const truncated = referenced.slice(0, maxRefs);
   const studies = [];
 
@@ -250,7 +249,7 @@ async function analyzeDoi(doi) {
 
   if (counts.retracted > 0 || counts.expression_of_concern > 0) {
     setStatus(
-      `Finished. ⚠️ Found ${counts.retracted} retracted and ${counts.expression_of_concern} with expression of concern among ${counts.total} cited works. Please review manually.`,
+      `Finished. Found ${counts.retracted} retracted and ${counts.expression_of_concern} with expression of concern among ${counts.total} cited works.`,
       false
     );
   } else {
@@ -264,27 +263,21 @@ async function analyzeDoi(doi) {
 function appendStudyRow(study) {
   const tbody = document.getElementById("resultsBody");
   const tr = document.createElement("tr");
-  tr.className = "border-b border-slate-100 hover:bg-slate-50";
   tr.dataset.status = study.status;
 
-  const doiLink =
-    study.doi
-      ? `<a href="https://doi.org/${encodeURIComponent(
-          study.doi
-        )}" target="_blank" rel="noopener noreferrer" class="text-emerald-700 hover:underline">${study.doi}</a>`
-      : "–";
+  const doiLink = study.doi
+    ? `<a href="https://doi.org/${encodeURIComponent(
+        study.doi
+      )}" target="_blank" rel="noopener noreferrer" class="doi-link">${study.doi}</a>`
+    : "—";
 
   tr.innerHTML = `
-    <td class="px-3 py-2 align-top text-[10px] text-slate-500">${study.idx}</td>
-    <td class="px-3 py-2 align-top">${mapStatusToBadge(study.status)}</td>
-    <td class="px-3 py-2 align-top text-[10px] text-slate-600">${study.year || "–"}</td>
-    <td class="px-3 py-2 align-top">
-      <div class="max-w-xs sm:max-w-sm break-words">${study.title}</div>
-    </td>
-    <td class="px-3 py-2 align-top">${doiLink}</td>
-    <td class="px-3 py-2 align-top text-[10px] text-slate-500">
-      <div class="max-w-xs sm:max-w-sm break-words">${study.notes}</div>
-    </td>
+    <td>${study.idx}</td>
+    <td>${mapStatusToTag(study.status)}</td>
+    <td>${study.year || "—"}</td>
+    <td><div style="max-width: 320px; word-break: break-word;">${study.title}</div></td>
+    <td>${doiLink}</td>
+    <td><div style="max-width: 320px; word-break: break-word; color:#6b7280;">${study.notes}</div></td>
   `;
 
   tbody.appendChild(tr);
@@ -298,124 +291,65 @@ function renderSummary(counts) {
 
   const pills = [];
 
-  // Total pill (clears filter)
-  pills.push(
-    `<button type="button"
-       class="pill-base bg-slate-900 text-slate-50"
-       data-filter="all">
-      <span class="text-[11px] font-semibold">Total</span>
-      <span class="text-xs">${counts.total}</span>
-    </button>`
-  );
+  pills.push(makePill("all", "Total", counts.total));
 
   if (counts.retracted > 0) {
-    pills.push(
-      `<button type="button"
-         class="pill-base bg-red-100 text-red-800 border border-red-200"
-         data-filter="retracted">
-        <span class="text-[11px] font-semibold">Retracted</span>
-        <span class="text-xs">${counts.retracted}</span>
-      </button>`
-    );
+    pills.push(makePill("retracted", "Retracted", counts.retracted));
   }
-
   if (counts.expression_of_concern > 0) {
     pills.push(
-      `<button type="button"
-         class="pill-base bg-amber-100 text-amber-800 border border-amber-200"
-         data-filter="expression_of_concern">
-        <span class="text-[11px] font-semibold">Expression of concern</span>
-        <span class="text-xs">${counts.expression_of_concern}</span>
-      </button>`
+      makePill("expression_of_concern", "Expression of concern", counts.expression_of_concern)
     );
   }
-
   if (counts.corrected > 0) {
     pills.push(
-      `<button type="button"
-         class="pill-base bg-blue-100 text-blue-800 border border-blue-200"
-         data-filter="corrected">
-        <span class="text-[11px] font-semibold">Corrected / Erratum</span>
-        <span class="text-xs">${counts.corrected}</span>
-      </button>`
+      makePill("corrected", "Corrected / Erratum", counts.corrected)
     );
   }
-
   if (counts.withdrawn > 0) {
-    pills.push(
-      `<button type="button"
-         class="pill-base bg-rose-100 text-rose-800 border border-rose-200"
-         data-filter="withdrawn">
-        <span class="text-[11px] font-semibold">Withdrawn</span>
-        <span class="text-xs">${counts.withdrawn}</span>
-      </button>`
-    );
+    pills.push(makePill("withdrawn", "Withdrawn", counts.withdrawn));
   }
-
   if (counts.no_doi > 0) {
-    pills.push(
-      `<button type="button"
-         class="pill-base bg-slate-100 text-slate-700 border border-slate-200"
-         data-filter="no_doi">
-        <span class="text-[11px] font-semibold">No DOI</span>
-        <span class="text-xs">${counts.no_doi}</span>
-      </button>`
-    );
+    pills.push(makePill("no_doi", "No DOI", counts.no_doi));
   }
-
   if (counts.unknown > 0) {
-    pills.push(
-      `<button type="button"
-         class="pill-base bg-slate-100 text-slate-700 border border-slate-200"
-         data-filter="unknown">
-        <span class="text-[11px] font-semibold">Unknown</span>
-        <span class="text-xs">${counts.unknown}</span>
-      </button>`
-    );
+    pills.push(makePill("unknown", "Unknown", counts.unknown));
   }
 
-  // Base pill style (using class name we can target from JS)
-  const pillBaseClass =
-    "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs cursor-pointer transition ring-0 ring-emerald-500/0 hover:ring-2 hover:ring-emerald-500/50";
-
-  summary.innerHTML = pills.join("");
-
-  // Ensure all pills have pillBaseClass (because they were built as strings)
-  summary.querySelectorAll("button").forEach((btn) => {
-    if (!btn.classList.contains("pill-base")) {
-      btn.classList.add("pill-base");
-    }
-  });
-
-  // Wire click handlers for filtering
-  summary.querySelectorAll("button[data-filter]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const filter = btn.getAttribute("data-filter");
-      if (currentFilter === filter) {
-        // Clicking the same pill again clears filter (back to "all")
-        currentFilter = "all";
-      } else {
-        currentFilter = filter;
-      }
-      updatePillActiveStates();
-      applyFilter(currentFilter);
-    });
-  });
-
-  // Initial state: "all" active
+  pills.forEach((btn) => summary.appendChild(btn));
   updatePillActiveStates();
 }
 
-function updatePillActiveStates() {
-  const summary = document.getElementById("summary");
-  summary.querySelectorAll("button[data-filter]").forEach((btn) => {
-    const filter = btn.getAttribute("data-filter");
-    if (currentFilter === filter || (currentFilter === "all" && filter === "all")) {
-      btn.classList.add("ring-2", "ring-emerald-500");
+function makePill(filter, label, count) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "pill";
+  btn.setAttribute("data-filter", filter);
+  btn.innerHTML = `<span class="pill-label">${label}</span><span class="pill-count">${count}</span>`;
+
+  btn.addEventListener("click", () => {
+    if (currentFilter === filter || (filter === "all" && currentFilter === "all")) {
+      currentFilter = "all";
     } else {
-      btn.classList.remove("ring-2", "ring-emerald-500");
+      currentFilter = filter;
     }
+    updatePillActiveStates();
+    applyFilter(currentFilter);
   });
+
+  return btn;
+}
+
+function updatePillActiveStates() {
+  document
+    .querySelectorAll("#summary .pill")
+    .forEach((btn) => {
+      const filter = btn.getAttribute("data-filter");
+      const active =
+        (currentFilter === "all" && filter === "all") ||
+        (currentFilter !== "all" && filter === currentFilter);
+      btn.classList.toggle("active", active);
+    });
 }
 
 function applyFilter(filter) {
@@ -423,9 +357,9 @@ function applyFilter(filter) {
   rows.forEach((tr) => {
     const status = tr.dataset.status || "unknown";
     if (filter === "all" || status === filter) {
-      tr.classList.remove("hidden");
+      tr.style.display = "";
     } else {
-      tr.classList.add("hidden");
+      tr.style.display = "none";
     }
   });
 }
@@ -443,7 +377,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!doi) return;
 
     button.disabled = true;
-    button.classList.add("opacity-70", "cursor-not-allowed");
     setStatus("");
 
     try {
@@ -453,8 +386,6 @@ document.addEventListener("DOMContentLoaded", () => {
       setStatus("Error: " + err.message, true);
     } finally {
       button.disabled = false;
-      button.classList.remove("opacity-70", "cursor-not-allowed");
     }
   });
 });
-
