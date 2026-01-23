@@ -7,14 +7,14 @@
 
   <style>
     :root {
-      --bg-page: #020617;          /* very dark slate (like OCT) */
-      --bg-card: #020617;          /* cards same base, with border */
-      --border-soft: #1f2937;      /* slate border */
+      --bg-page: #020617;
+      --bg-card: #020617;
+      --border-soft: #1f2937;
       --border-strong: #334155;
-      --text-main: #e5e7eb;        /* slate-200 */
-      --text-muted: #9ca3af;       /* slate-400 */
-      --accent: #38bdf8;           /* sky-400 (ANALYZE) */
-      --accent-dark: #0ea5e9;      /* sky-500 */
+      --text-main: #e5e7eb;
+      --text-muted: #9ca3af;
+      --accent: #38bdf8;
+      --accent-dark: #0ea5e9;
       --accent-soft: rgba(56, 189, 248, 0.1);
       --danger: #f97373;
       --font-main: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -32,7 +32,7 @@
     }
 
     a {
-      color: #93c5fd; /* blue-300 */
+      color: #93c5fd;
       text-decoration: none;
     }
     a:hover { color: #bfdbfe; text-decoration: underline; }
@@ -42,8 +42,6 @@
       margin: 24px auto 40px;
       padding: 0 16px;
     }
-
-    /* Header (copying OCT structure) */
 
     .page-header {
       margin-bottom: 16px;
@@ -82,8 +80,6 @@
       color: #4b5563;
     }
 
-    /* Section titles “INPUT”, “RESULTS” like OCT */
-
     .section-title {
       font-size: 0.8rem;
       font-weight: 600;
@@ -104,7 +100,7 @@
 
     .hidden { display: none; }
 
-    /* Input area */
+    /* Input */
 
     .doi-form {
       margin-top: 6px;
@@ -239,8 +235,15 @@
     .table-header {
       display: flex;
       justify-content: space-between;
-      align-items: baseline;
+      align-items: center;
       margin-bottom: 6px;
+      gap: 8px;
+    }
+
+    .table-header-left {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
     }
 
     .table-title {
@@ -252,7 +255,33 @@
     .table-note {
       font-size: 0.7rem;
       color: var(--text-muted);
-      text-align: right;
+    }
+
+    .table-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #exportCsvBtn {
+      border-radius: 999px;
+      border: 1px solid #374151;
+      background: #020617;
+      color: #e5e7eb;
+      font-size: 0.75rem;
+      padding: 6px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #exportCsvBtn:hover {
+      border-color: var(--accent);
+      color: #f9fafb;
+    }
+
+    #exportCsvBtn:disabled {
+      opacity: 0.4;
+      cursor: default;
     }
 
     .table-wrapper {
@@ -374,7 +403,7 @@
           <input
             id="doiInput"
             type="text"
-            placeholder="10.1136/rapm-2024-105547"
+            placeholder="https://doi.org/10.1136/rapm-2024-105547"
             required
           />
         </div>
@@ -403,9 +432,14 @@
       <div class="section-title">Results</div>
 
       <div class="table-header">
-        <div class="table-title">Cited references</div>
-        <div class="table-note">
-          Status derived from Crossref “update” metadata (retractions, corrections, etc.).
+        <div class="table-header-left">
+          <div class="table-title">Cited references</div>
+          <div class="table-note">
+            Status derived from Crossref “update” metadata (retractions, corrections, etc.).
+          </div>
+        </div>
+        <div class="table-controls">
+          <button id="exportCsvBtn" type="button" disabled>Export CSV</button>
         </div>
       </div>
 
@@ -431,7 +465,6 @@
     </div>
   </div>
 
-  <!-- This assumes you keep the vanilla app.js I sent previously -->
   <script src="assets/js/app.js"></script>
 </body>
 </html>
