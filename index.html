@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Retraction Radar</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Tailwind CDN for quick styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-900">
+  <main class="min-h-screen flex flex-col">
+    <header class="bg-slate-900 text-slate-100">
+      <div class="max-w-4xl mx-auto px-4 py-6">
+        <h1 class="text-2xl font-semibold">Retraction Radar</h1>
+        <p class="mt-1 text-sm text-slate-300">
+          Paste the DOI of a meta-analysis (or any article). I’ll fetch its references
+          and flag which cited papers appear retracted or corrected (via OpenAlex + Crossref).
+        </p>
+      </div>
+    </header>
+
+    <section class="flex-1 max-w-4xl mx-auto px-4 py-6 space-y-4">
+      <!-- Input -->
+      <form id="doiForm" class="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <label class="flex-1">
+          <span class="block text-sm font-medium text-slate-700 mb-1">Article DOI</span>
+          <input
+            id="doiInput"
+            type="text"
+            placeholder="10.1002/ana.410360301"
+            class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+            required
+          />
+        </label>
+
+        <button
+          id="analyzeBtn"
+          type="submit"
+          class="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+        >
+          Analyze
+        </button>
+      </form>
+
+      <!-- Status / Meta info -->
+      <div id="status" class="text-sm text-slate-600"></div>
+
+      <div id="metaInfo" class="hidden border border-slate-200 rounded-md bg-white p-3 text-sm space-y-1">
+        <div><span class="font-semibold">Title:</span> <span id="metaTitle"></span></div>
+        <div><span class="font-semibold">Year:</span> <span id="metaYear"></span></div>
+        <div><span class="font-semibold">DOI:</span> <span id="metaDoi"></span></div>
+        <div><span class="font-semibold">References with IDs:</span> <span id="metaRefCount"></span></div>
+      </div>
+
+      <!-- Summary pills -->
+      <div id="summary" class="hidden flex flex-wrap gap-2 text-xs"></div>
+
+      <!-- Table -->
+      <div class="mt-2 bg-white border border-slate-200 rounded-md shadow-sm overflow-hidden">
+        <div class="px-3 py-2 border-b border-slate-200 flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-slate-800">Cited references</h2>
+          <span id="tableHint" class="text-[11px] text-slate-500">
+            Status is based on Crossref “update” metadata. Always verify manually.
+          </span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-xs text-left">
+            <thead class="bg-slate-50 text-slate-600 border-b border-slate-200">
+              <tr>
+                <th class="px-3 py-2">#</th>
+                <th class="px-3 py-2">Status</th>
+                <th class="px-3 py-2">Year</th>
+                <th class="px-3 py-2">Title</th>
+                <th class="px-3 py-2">DOI</th>
+                <th class="px-3 py-2">Notes</th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody">
+              <!-- Rows injected by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <footer class="border-t border-slate-200 bg-slate-50">
+      <div class="max-w-4xl mx-auto px-4 py-3 text-[11px] text-slate-500 flex flex-wrap gap-2">
+        <span>Data sources: OpenAlex, Crossref.</span>
+        <span>Prototype only – always confirm retractions manually.</span>
+      </div>
+    </footer>
+  </main>
+
+  <script src="assets/js/app.js" defer></script>
+</body>
+</html>
