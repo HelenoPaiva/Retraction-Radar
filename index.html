@@ -7,18 +7,14 @@
 
   <style>
     :root {
-      --bg-page: #f3f4f6;       /* light gray background */
-      --bg-card: #ffffff;       /* white cards */
-      --border-soft: #e5e7eb;   /* soft border */
-      --text-main: #111827;     /* almost-black text */
-      --text-muted: #6b7280;    /* muted gray */
-      --accent: #047857;        /* emerald-ish accent */
-      --accent-soft: #ecfdf5;   /* pale emerald */
-      --pill-bg: #f3f4f6;
-      --pill-border: #d1d5db;
-      --pill-active-bg: #047857;
-      --pill-active-text: #f9fafb;
-      --pill-active-border: #065f46;
+      --bg-page: #f3f4f6;
+      --bg-card: #ffffff;
+      --border-soft: #e5e7eb;
+      --text-main: #111827;
+      --text-muted: #6b7280;
+      --accent: #047857;
+      --accent-dark: #065f46;
+      --accent-soft: #ecfdf5;
       --link: #2563eb;
       --link-hover: #1d4ed8;
       --font-main: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -48,23 +44,23 @@
 
     .page {
       max-width: 960px;
-      margin: 32px auto;
-      padding: 0 16px 32px;
+      margin: 24px auto 40px;
+      padding: 0 16px;
     }
 
     header.page-header {
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
 
     .page-title {
-      font-size: 1.8rem;
+      font-size: 1.9rem;
       font-weight: 700;
       margin: 0 0 4px;
       letter-spacing: -0.02em;
     }
 
     .page-subtitle {
-      margin: 0 0 8px;
+      margin: 0 0 6px;
       font-size: 0.9rem;
       color: var(--text-muted);
     }
@@ -72,33 +68,42 @@
     .page-meta {
       font-size: 0.8rem;
       color: var(--text-muted);
-      margin-bottom: 16px;
+      margin: 0 0 10px;
     }
 
-    .page-meta span {
-      margin-right: 6px;
+    .page-meta span + span::before {
+      content: "·";
+      margin: 0 4px;
+      color: #9ca3af;
     }
 
-    .page-meta a {
-      font-weight: 500;
+    h2.section-title {
+      font-size: 1.1rem;
+      margin: 0 0 10px;
+      font-weight: 600;
     }
 
     .card {
       background: var(--bg-card);
       border: 1px solid var(--border-soft);
       border-radius: 8px;
-      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-      padding: 16px 16px 12px;
-      margin-bottom: 16px;
+      padding: 12px 14px 10px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+      margin-bottom: 14px;
     }
 
-    /* DOI form */
+    .hidden {
+      display: none;
+    }
+
+    /* Input / form */
 
     .doi-form {
       display: flex;
       flex-direction: column;
       gap: 8px;
-      margin-bottom: 8px;
+      margin-top: 4px;
+      margin-bottom: 4px;
     }
 
     .doi-form-row {
@@ -109,7 +114,7 @@
     }
 
     .doi-label {
-      font-size: 0.75rem;
+      font-size: 0.8rem;
       font-weight: 600;
       color: #4b5563;
     }
@@ -150,7 +155,7 @@
     }
 
     #analyzeBtn:hover {
-      background: #065f46;
+      background: var(--accent-dark);
     }
 
     #analyzeBtn:disabled {
@@ -163,23 +168,24 @@
         flex-direction: row;
         align-items: flex-end;
       }
-
       .doi-form-row {
         margin-right: 4px;
       }
-
       .doi-actions {
         align-items: center;
       }
     }
 
-    /* Status text */
+    /* Status */
 
     #status {
       font-size: 0.8rem;
       color: var(--text-muted);
       margin-top: 4px;
-      margin-bottom: 4px;
+    }
+
+    #status.error {
+      color: #b91c1c;
     }
 
     /* Meta info */
@@ -191,21 +197,21 @@
       border-radius: 6px;
       border: 1px solid var(--border-soft);
       padding: 8px 10px;
-      margin: 8px 0 12px;
+      margin-top: 8px;
     }
 
     #metaInfo div + div {
-      margin-top: 2px;
+      margin-top: 3px;
     }
 
-    #metaInfo span.label {
+    #metaInfo .label {
       font-weight: 600;
     }
 
     /* Summary pills */
 
     #summaryWrapper {
-      margin: 0 0 12px;
+      margin-top: 10px;
     }
 
     #summary {
@@ -218,8 +224,8 @@
       font-size: 0.75rem;
       padding: 4px 9px;
       border-radius: 999px;
-      background: var(--pill-bg);
-      border: 1px solid var(--pill-border);
+      background: #f3f4f6;
+      border: 1px solid #d1d5db;
       color: #374151;
       cursor: pointer;
       display: inline-flex;
@@ -227,39 +233,32 @@
       gap: 6px;
     }
 
+    .pill-label {
+      text-transform: none;
+    }
+
     .pill-count {
       font-weight: 600;
       font-variant-numeric: tabular-nums;
     }
 
-    .pill-label {
-      text-transform: none;
-    }
-
     .pill.active {
-      background: var(--pill-active-bg);
-      border-color: var(--pill-active-border);
-      color: var(--pill-active-text);
+      background: var(--accent);
+      border-color: var(--accent-dark);
+      color: #f9fafb;
     }
 
     /* Table */
-
-    .table-card {
-      padding-top: 0;
-    }
 
     .table-header {
       display: flex;
       justify-content: space-between;
       align-items: baseline;
-      padding-bottom: 8px;
-      border-bottom: 1px solid var(--border-soft);
-      margin-bottom: 4px;
+      margin-bottom: 6px;
     }
 
-    .table-header h2 {
-      font-size: 0.9rem;
-      margin: 0;
+    .table-title {
+      font-size: 0.95rem;
       font-weight: 600;
     }
 
@@ -302,7 +301,7 @@
     }
 
     tbody tr:hover {
-      background: #f1f5f9;
+      background: #eef2ff;
     }
 
     .status-tag {
@@ -332,8 +331,15 @@
 
     .status-tag--clean {
       border-color: #059669;
-      background: #ecfdf5;
-      color: #047857;
+      background: var(--accent-soft);
+      color: var(--accent-dark);
+    }
+
+    .status-tag--no-doi,
+    .status-tag--unknown {
+      border-color: #d1d5db;
+      background: #f3f4f6;
+      color: #4b5563;
     }
 
     .doi-link {
@@ -350,36 +356,35 @@
 </head>
 <body>
   <div class="page">
-
     <header class="page-header">
       <h1 class="page-title">Retraction Radar</h1>
       <p class="page-subtitle">
-        An open, reproducible report of how cited articles are being updated (retractions, corrections, expressions of concern).
+        An open, reproducible report of how cited articles are affected by retractions,
+        corrections and expressions of concern.
       </p>
       <p class="page-meta">
-        <span><a href="https://github.com/HelenoPaiva/OpenCitationTrajectory" target="_blank" rel="noopener noreferrer">View source on GitHub</a></span>
-        ·
+        <span><a href="https://github.com/HelenoPaiva/RetractionRadar" target="_blank" rel="noopener noreferrer">GitHub repository</a></span>
         <span>Paste any article DOI below to scan its reference list.</span>
       </p>
     </header>
 
-    <!-- Input + status -->
+    <!-- INPUT -->
     <section class="card">
+      <h2 class="section-title">Input</h2>
+
       <form id="doiForm" class="doi-form">
         <div class="doi-form-row">
-          <label for="doiInput" class="doi-label">Article DOI</label>
+          <label for="doiInput" class="doi-label">DOI or DOI URL</label>
           <input
             id="doiInput"
             type="text"
-            placeholder="10.xxxx/xxxxxx"
+            placeholder="10.1136/rapm-2024-105547"
             required
           />
         </div>
 
         <div class="doi-actions">
-          <button id="analyzeBtn" type="submit">
-            Analyze
-          </button>
+          <button id="analyzeBtn" type="submit">ANALYZE</button>
         </div>
       </form>
 
@@ -397,13 +402,11 @@
       </div>
     </section>
 
-    <!-- Table -->
-    <section class="card table-card">
+    <!-- RESULTS -->
+    <section class="card">
       <div class="table-header">
-        <h2>Cited references</h2>
-        <div class="table-note">
-          Status is derived from Crossref “update” metadata. Always verify manually.
-        </div>
+        <div class="table-title">Cited references</div>
+        <div class="table-note">Status derived from Crossref “update” metadata (retractions, corrections, etc.).</div>
       </div>
 
       <div class="table-wrapper">
@@ -431,4 +434,3 @@
   <script src="assets/js/app.js"></script>
 </body>
 </html>
-
