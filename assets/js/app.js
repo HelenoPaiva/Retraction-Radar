@@ -1,17 +1,20 @@
 // assets/js/app.js
 
+// Global current filter
+let currentFilter = "all";
+
 // --- Helpers ---------------------------------------------------------
 
 function setStatus(message, isError = false) {
   const el = document.getElementById("status");
   el.textContent = message;
   el.className =
-    "text-sm mt-1 " +
+    "text-xs sm:text-sm mt-1 " +
     (isError ? "text-red-700" : "text-slate-600");
 }
 
 function badge(label, colorClasses) {
-  return `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${colorClasses}">${label}</span>`;
+  return `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${colorClasses}">${label}</span>`;
 }
 
 function mapStatusToBadge(status) {
@@ -50,7 +53,6 @@ async function fetchOpenAlexWorkByDoi(doi) {
 }
 
 async function fetchOpenAlexWorkById(openAlexId) {
-  // openAlexId can be a full URL like "https://openalex.org/W123..."
   const url = `https://api.openalex.org/works/${encodeURIComponent(
     openAlexId.replace("https://openalex.org/", "")
   )}`;
@@ -75,48 +77,40 @@ async function fetchCrossrefForDoi(doi) {
 }
 
 function determineRetractionStatusFromCrossref(message) {
-  // Default
   let status = "ok";
   let notes = [];
 
-  // 1) "update-to" array is where Crossref often encodes retractions / corrections
   const updateTo = message["update-to"] || message["update_to"] || [];
   if (Array.isArray(updateTo) && updateTo.length > 0) {
     for (const u of updateTo) {
       const updateType = (u["update-type"] || u["update_type"] || "").toLowerCase();
       if (updateType.includes("retract")) {
         status = "retracted";
-        notes.push("Crossref: update-type = retraction");
+        notes.push("Crossref: update-type = retraction.");
       } else if (updateType.includes("expression")) {
         status = "expression_of_concern";
-        notes.push("Crossref: update-type = expression of concern");
+        notes.push("Crossref: update-type = expression of concern.");
       } else if (
         updateType.includes("correction") ||
         updateType.includes("erratum")
       ) {
-        // Only set if not already retracted/EoC
-        if (status === "ok") {
-          status = "corrected";
-        }
-        notes.push("Crossref: update-type = correction/erratum");
+        if (status === "ok") status = "corrected";
+        notes.push("Crossref: update-type = correction/erratum.");
       } else if (updateType.includes("withdraw")) {
-        if (status === "ok") {
-          status = "withdrawn";
-        }
-        notes.push("Crossref: update-type = withdrawal");
+        if (status === "ok") status = "withdrawn";
+        notes.push("Crossref: update-type = withdrawal.");
       }
     }
   }
 
-  // 2) relation: is-retracted-by etc.
   if (message.relation) {
     const rel = message.relation;
     if (rel["is-retracted-by"] || rel["is-retracted-by:"]) {
       status = "retracted";
-      notes.push("Crossref: relation = is-retracted-by");
+      notes.push("Crossref relation: is-retracted-by.");
     } else if (rel["has-retraction"] || rel["has-retraction:"]) {
       status = "retracted";
-      notes.push("Crossref: relation = has-retraction");
+      notes.push("Crossref relation: has-retraction.");
     }
   }
 
@@ -146,15 +140,14 @@ async function getRetractionInfoForDoi(doi) {
 // --- Main workflow ---------------------------------------------------
 
 async function analyzeDoi(doi) {
-  // Reset UI
   const resultsBody = document.getElementById("resultsBody");
   resultsBody.innerHTML = "";
-  document.getElementById("summary").classList.add("hidden");
+  document.getElementById("summaryWrapper").classList.add("hidden");
   document.getElementById("metaInfo").classList.add("hidden");
+  currentFilter = "all";
 
   setStatus("Resolving DOI via OpenAlex…");
 
-  // 1. Fetch the main article
   const work = await fetchOpenAlexWorkByDoi(doi);
 
   const title = work.display_name || "(no title)";
@@ -162,7 +155,6 @@ async function analyzeDoi(doi) {
   const workDoi = work.doi || doi;
   const referenced = work.referenced_works || [];
 
-  // Update meta info panel
   document.getElementById("metaTitle").textContent = title;
   document.getElementById("metaYear").textContent = year || "–";
   document.getElementById("metaDoi").textContent = workDoi || "–";
@@ -181,8 +173,7 @@ async function analyzeDoi(doi) {
     `Found ${referenced.length} referenced works in OpenAlex. Fetching metadata and retraction status…`
   );
 
-  // 2. Fetch referenced works metadata in batches
-  const maxRefs = 200; // safety cap for the MVP
+  const maxRefs = 200; // safety cap
   const truncated = referenced.slice(0, maxRefs);
   const studies = [];
 
@@ -203,19 +194,18 @@ async function analyzeDoi(doi) {
         retractionStatus = await getRetractionInfoForDoi(refDoi);
       }
 
-      studies.push({
+      const study = {
         idx: index,
         title: refTitle,
         year: refYear,
         doi: refDoi,
         status: retractionStatus.status,
         notes: retractionStatus.notes,
-      });
+      };
 
-      // Render row as we go
-      appendStudyRow(studies[studies.length - 1]);
+      studies.push(study);
+      appendStudyRow(study);
 
-      // Update inline status occasionally
       if (index % 10 === 0) {
         setStatus(
           `Checked ${index}/${truncated.length} references… still working.`
@@ -223,19 +213,19 @@ async function analyzeDoi(doi) {
       }
     } catch (err) {
       console.error("Error processing reference", refId, err);
-      studies.push({
+      const study = {
         idx: index,
         title: "(error fetching reference)",
         year: "",
         doi: null,
         status: "unknown",
         notes: "Error fetching OpenAlex work for this reference.",
-      });
-      appendStudyRow(studies[studies.length - 1]);
+      };
+      studies.push(study);
+      appendStudyRow(study);
     }
   }
 
-  // 3. Build summary
   const counts = {
     total: studies.length,
     ok: 0,
@@ -256,8 +246,8 @@ async function analyzeDoi(doi) {
   }
 
   renderSummary(counts);
+  document.getElementById("summaryWrapper").classList.remove("hidden");
 
-  // Final status line
   if (counts.retracted > 0 || counts.expression_of_concern > 0) {
     setStatus(
       `Finished. ⚠️ Found ${counts.retracted} retracted and ${counts.expression_of_concern} with expression of concern among ${counts.total} cited works. Please review manually.`,
@@ -275,6 +265,7 @@ function appendStudyRow(study) {
   const tbody = document.getElementById("resultsBody");
   const tr = document.createElement("tr");
   tr.className = "border-b border-slate-100 hover:bg-slate-50";
+  tr.dataset.status = study.status;
 
   const doiLink =
     study.doi
@@ -284,20 +275,22 @@ function appendStudyRow(study) {
       : "–";
 
   tr.innerHTML = `
-    <td class="px-3 py-2 align-top text-[11px] text-slate-500">${study.idx}</td>
+    <td class="px-3 py-2 align-top text-[10px] text-slate-500">${study.idx}</td>
     <td class="px-3 py-2 align-top">${mapStatusToBadge(study.status)}</td>
-    <td class="px-3 py-2 align-top text-[11px] text-slate-600">${study.year || "–"}</td>
-    <td class="px-3 py-2 align-top text-[11px]">
-      <div class="max-w-xs break-words">${study.title}</div>
+    <td class="px-3 py-2 align-top text-[10px] text-slate-600">${study.year || "–"}</td>
+    <td class="px-3 py-2 align-top">
+      <div class="max-w-xs sm:max-w-sm break-words">${study.title}</div>
     </td>
-    <td class="px-3 py-2 align-top text-[11px]">${doiLink}</td>
-    <td class="px-3 py-2 align-top text-[11px] text-slate-500">
-      <div class="max-w-xs break-words">${study.notes}</div>
+    <td class="px-3 py-2 align-top">${doiLink}</td>
+    <td class="px-3 py-2 align-top text-[10px] text-slate-500">
+      <div class="max-w-xs sm:max-w-sm break-words">${study.notes}</div>
     </td>
   `;
 
   tbody.appendChild(tr);
 }
+
+// --- Summary + filter logic -----------------------------------------
 
 function renderSummary(counts) {
   const summary = document.getElementById("summary");
@@ -305,69 +298,136 @@ function renderSummary(counts) {
 
   const pills = [];
 
+  // Total pill (clears filter)
   pills.push(
-    `<div class="inline-flex items-center gap-1 rounded-full bg-slate-900 text-slate-50 px-2.5 py-1">
+    `<button type="button"
+       class="pill-base bg-slate-900 text-slate-50"
+       data-filter="all">
       <span class="text-[11px] font-semibold">Total</span>
       <span class="text-xs">${counts.total}</span>
-    </div>`
+    </button>`
   );
 
   if (counts.retracted > 0) {
     pills.push(
-      `<div class="inline-flex items-center gap-1 rounded-full bg-red-100 text-red-800 px-2.5 py-1 border border-red-200">
+      `<button type="button"
+         class="pill-base bg-red-100 text-red-800 border border-red-200"
+         data-filter="retracted">
         <span class="text-[11px] font-semibold">Retracted</span>
         <span class="text-xs">${counts.retracted}</span>
-      </div>`
+      </button>`
     );
   }
 
   if (counts.expression_of_concern > 0) {
     pills.push(
-      `<div class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2.5 py-1 border border-amber-200">
+      `<button type="button"
+         class="pill-base bg-amber-100 text-amber-800 border border-amber-200"
+         data-filter="expression_of_concern">
         <span class="text-[11px] font-semibold">Expression of concern</span>
         <span class="text-xs">${counts.expression_of_concern}</span>
-      </div>`
+      </button>`
     );
   }
 
   if (counts.corrected > 0) {
     pills.push(
-      `<div class="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-800 px-2.5 py-1 border border-blue-200">
+      `<button type="button"
+         class="pill-base bg-blue-100 text-blue-800 border border-blue-200"
+         data-filter="corrected">
         <span class="text-[11px] font-semibold">Corrected / Erratum</span>
         <span class="text-xs">${counts.corrected}</span>
-      </div>`
+      </button>`
     );
   }
 
   if (counts.withdrawn > 0) {
     pills.push(
-      `<div class="inline-flex items-center gap-1 rounded-full bg-rose-100 text-rose-800 px-2.5 py-1 border border-rose-200">
+      `<button type="button"
+         class="pill-base bg-rose-100 text-rose-800 border border-rose-200"
+         data-filter="withdrawn">
         <span class="text-[11px] font-semibold">Withdrawn</span>
         <span class="text-xs">${counts.withdrawn}</span>
-      </div>`
+      </button>`
     );
   }
 
   if (counts.no_doi > 0) {
     pills.push(
-      `<div class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700 px-2.5 py-1 border border-slate-200">
+      `<button type="button"
+         class="pill-base bg-slate-100 text-slate-700 border border-slate-200"
+         data-filter="no_doi">
         <span class="text-[11px] font-semibold">No DOI</span>
         <span class="text-xs">${counts.no_doi}</span>
-      </div>`
+      </button>`
     );
   }
 
   if (counts.unknown > 0) {
     pills.push(
-      `<div class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700 px-2.5 py-1 border border-slate-200">
+      `<button type="button"
+         class="pill-base bg-slate-100 text-slate-700 border border-slate-200"
+         data-filter="unknown">
         <span class="text-[11px] font-semibold">Unknown</span>
         <span class="text-xs">${counts.unknown}</span>
-      </div>`
+      </button>`
     );
   }
 
+  // Base pill style (using class name we can target from JS)
+  const pillBaseClass =
+    "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs cursor-pointer transition ring-0 ring-emerald-500/0 hover:ring-2 hover:ring-emerald-500/50";
+
   summary.innerHTML = pills.join("");
-  summary.classList.remove("hidden");
+
+  // Ensure all pills have pillBaseClass (because they were built as strings)
+  summary.querySelectorAll("button").forEach((btn) => {
+    if (!btn.classList.contains("pill-base")) {
+      btn.classList.add("pill-base");
+    }
+  });
+
+  // Wire click handlers for filtering
+  summary.querySelectorAll("button[data-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const filter = btn.getAttribute("data-filter");
+      if (currentFilter === filter) {
+        // Clicking the same pill again clears filter (back to "all")
+        currentFilter = "all";
+      } else {
+        currentFilter = filter;
+      }
+      updatePillActiveStates();
+      applyFilter(currentFilter);
+    });
+  });
+
+  // Initial state: "all" active
+  updatePillActiveStates();
+}
+
+function updatePillActiveStates() {
+  const summary = document.getElementById("summary");
+  summary.querySelectorAll("button[data-filter]").forEach((btn) => {
+    const filter = btn.getAttribute("data-filter");
+    if (currentFilter === filter || (currentFilter === "all" && filter === "all")) {
+      btn.classList.add("ring-2", "ring-emerald-500");
+    } else {
+      btn.classList.remove("ring-2", "ring-emerald-500");
+    }
+  });
+}
+
+function applyFilter(filter) {
+  const rows = document.querySelectorAll("#resultsBody tr");
+  rows.forEach((tr) => {
+    const status = tr.dataset.status || "unknown";
+    if (filter === "all" || status === filter) {
+      tr.classList.remove("hidden");
+    } else {
+      tr.classList.add("hidden");
+    }
+  });
 }
 
 // --- Wiring ----------------------------------------------------------
@@ -397,3 +457,4 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
+
