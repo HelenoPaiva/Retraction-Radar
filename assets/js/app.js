@@ -1,7 +1,9 @@
-// Retraction Radar 2.0 – full app.js
-// - Main article: Crossref + PubMed + Retraction Watch + OpenAlex is_retracted
-// - References: only show retracted and problematic refs, but evaluate all
-// - Designed to match OpenCitationTrajectory / Anesthesia TOC visual style
+// Retraction Radar 2.0 – full app.js with:
+// - Main article retraction chip
+// - Citation-level retraction checking
+// - Clickable summary chips for filtering
+// - Progress bar while processing references
+// - Retraction Watch CSV status indicator
 
 // ==================== CONFIG ====================
 
@@ -11,7 +13,7 @@ const PUBMED_API_KEY = "7d653c3573d4967a70f644df87ffbd392708";
 // Optional polite parameter for OpenAlex
 const OPENALEX_MAILTO = "name@example.org";
 
-// Retraction Watch CSV (may fail in browser due to CORS; we fail soft)
+// Retraction Watch CSV (remote; may be mirrored later)
 const RW_CSV_URL =
   "https://gitlab.com/crossref/retraction-watch-data/-/raw/main/retraction_watch.csv?ref_type=heads";
 
@@ -20,7 +22,14 @@ const RW_CSV_URL =
 let lastAnalyzedDoi = "";
 let currentInterestingRefs = []; // retracted + problematic only
 let currentCounts = null;
+let currentFilter = "all";
+
 let rwIndexPromise = null; // Promise<Set<string>>
+let rwIndexMeta = { loaded: false, size: 0, error: null };
+
+// progress bar state
+let totalRefsForProgress = 0;
+let processedRefsForProgress = 0;
 
 // ==================== HELPERS ====================
 
@@ -131,7 +140,7 @@ function parseRetractionWatchCsv(text) {
   if (!lines.length) return new Set();
 
   const header = parseCsvLine(lines[0]);
-  // Your Apps Script uses OriginalPaperDOI; we accept that and plain "doi"
+  // Try OriginalPaperDOI first, then any DOI-like column
   const doiColIndex = header.findIndex((h) => {
     const t = String(h).trim().toLowerCase();
     return t === "originalpaperdoi" || t === "doi" || t.includes("doi");
@@ -156,25 +165,52 @@ function parseRetractionWatchCsv(text) {
   return seen;
 }
 
+function updateRwStatus() {
+  let el = $("rwStatus");
+  if (!el) return;
+  if (rwIndexMeta.loaded) {
+    el.textContent = `Retraction Watch data: loaded (${rwIndexMeta.size} DOIs).`;
+    el.className = "rw-status rw-status--ok";
+  } else if (rwIndexMeta.error) {
+    el.textContent = `Retraction Watch data: unavailable (${rwIndexMeta.error}). Using Crossref/PubMed/OpenAlex only.`;
+    el.className = "rw-status rw-status--error";
+  } else {
+    el.textContent = "Retraction Watch data: loading…";
+    el.className = "rw-status rw-status--loading";
+  }
+}
+
 function ensureRetractionWatchIndex() {
   if (!rwIndexPromise) {
+    rwIndexMeta = { loaded: false, size: 0, error: null };
+    updateRwStatus();
+
     rwIndexPromise = fetch(RW_CSV_URL)
       .then((res) => {
         if (!res.ok) {
-          throw new Error("Retraction Watch CSV HTTP " + res.status);
+          throw new Error("HTTP " + res.status);
         }
         return res.text();
       })
       .then((text) => {
-        console.log("Retraction Watch CSV loaded");
-        return parseRetractionWatchCsv(text);
+        const set = parseRetractionWatchCsv(text);
+        rwIndexMeta.loaded = true;
+        rwIndexMeta.size = set.size;
+        rwIndexMeta.error = null;
+        updateRwStatus();
+        console.log("Retraction Watch CSV loaded with", set.size, "entries");
+        return set;
       })
       .catch((err) => {
+        rwIndexMeta.loaded = false;
+        rwIndexMeta.size = 0;
+        rwIndexMeta.error = err.message || String(err);
+        updateRwStatus();
         console.warn(
-          "Retraction Watch CSV could not be loaded (likely CORS or network):",
+          "Retraction Watch CSV could not be loaded (likely CORS/network):",
           err
         );
-        return new Set(); // fail soft: acts as "no extra info"
+        return new Set(); // fail soft
       });
   }
   return rwIndexPromise;
@@ -506,6 +542,72 @@ async function classifyReferenceFromWork(idx, work) {
   };
 }
 
+// ==================== PROGRESS BAR ====================
+
+function ensureProgressBarDom() {
+  let wrapper = $("progressBarWrapper");
+  if (wrapper) return wrapper;
+
+  const statusEl = $("status");
+  if (!statusEl || !statusEl.parentNode) return null;
+
+  wrapper = document.createElement("div");
+  wrapper.id = "progressBarWrapper";
+  wrapper.style.marginTop = "0.5rem";
+  wrapper.style.height = "4px";
+  wrapper.style.borderRadius = "999px";
+  wrapper.style.background = "#111827"; // dark gray
+  wrapper.style.overflow = "hidden";
+  wrapper.style.display = "none";
+
+  const inner = document.createElement("div");
+  inner.id = "progressBarInner";
+  inner.style.height = "100%";
+  inner.style.width = "0%";
+  inner.style.background = "#10b981"; // teal/green accent
+  inner.style.transition = "width 0.2s ease-out";
+
+  wrapper.appendChild(inner);
+  statusEl.parentNode.insertBefore(wrapper, statusEl.nextSibling);
+  return wrapper;
+}
+
+function initProgress(total) {
+  const wrapper = ensureProgressBarDom();
+  if (!wrapper) return;
+  totalRefsForProgress = total || 0;
+  processedRefsForProgress = 0;
+  const inner = $("progressBarInner");
+  if (inner) inner.style.width = "0%";
+  wrapper.style.display = totalRefsForProgress > 0 ? "block" : "none";
+}
+
+function updateProgressBar() {
+  const wrapper = $("progressBarWrapper");
+  const inner = $("progressBarInner");
+  if (!wrapper || !inner || totalRefsForProgress <= 0) return;
+  const pct = Math.min(
+    100,
+    Math.round((processedRefsForProgress / totalRefsForProgress) * 100)
+  );
+  inner.style.width = pct + "%";
+}
+
+function incrementProgress() {
+  processedRefsForProgress++;
+  updateProgressBar();
+}
+
+function finishProgress() {
+  const wrapper = $("progressBarWrapper");
+  const inner = $("progressBarInner");
+  if (!wrapper || !inner) return;
+  inner.style.width = "100%";
+  setTimeout(() => {
+    wrapper.style.display = "none";
+  }, 600);
+}
+
 // ==================== MAIN ANALYSIS FLOW ====================
 
 function normalizeDoiInput(raw) {
@@ -536,6 +638,7 @@ async function analyzeDoi(rawInput) {
 
   currentInterestingRefs = [];
   currentCounts = null;
+  currentFilter = "all";
 
   // Reset UI
   resultsBody.innerHTML = "";
@@ -589,7 +692,6 @@ async function analyzeDoi(rawInput) {
     metaTitleSpan.textContent = rawTitle;
   }
 
-  // Optional secondary line in the meta card
   if (metaStatusEl) {
     if (isClearlyRetracted) {
       metaStatusEl.textContent =
@@ -616,6 +718,8 @@ async function analyzeDoi(rawInput) {
   const allRefs = [];
   let idxCounter = 0;
 
+  initProgress(refIds.length);
+
   for (const refId of refIds) {
     idxCounter++;
     try {
@@ -628,6 +732,7 @@ async function analyzeDoi(rawInput) {
         classifyReferenceError(idxCounter, refId, err.message || "fetch error")
       );
     }
+    incrementProgress();
 
     if (idxCounter % 10 === 0) {
       setStatus(
@@ -635,6 +740,8 @@ async function analyzeDoi(rawInput) {
       );
     }
   }
+
+  finishProgress();
 
   // 3) Aggregate counts & select interesting refs
   const counts = {
@@ -661,19 +768,8 @@ async function analyzeDoi(rawInput) {
   currentInterestingRefs = interesting;
   currentCounts = counts;
 
-  // 4) Render table
-  resultsBody.innerHTML = "";
-
-  if (!interesting.length) {
-    const tr = document.createElement("tr");
-    tr.innerHTML =
-      '<td colspan="6" style="padding:0.75rem;color:#9ca3af;">No retracted or problematic references detected. All references appear OK according to Crossref/PubMed/Retraction Watch (but manual verification is still recommended).</td>';
-    resultsBody.appendChild(tr);
-  } else {
-    interesting.forEach((ref) => appendRefRow(ref));
-  }
-
-  // 5) Summary pills
+  // 4) Render table + summary + default filter
+  renderRefsTable("all");
   renderSummaryPills(counts);
   summaryWrapper.classList.remove("hidden");
   exportBtn.disabled = currentInterestingRefs.length === 0;
@@ -696,7 +792,7 @@ async function analyzeDoi(rawInput) {
   }
 }
 
-// ==================== RENDERING ====================
+// ==================== RENDERING / FILTERING ====================
 
 function appendRefRow(ref) {
   const tbody = $("resultsBody");
@@ -742,18 +838,103 @@ function appendRefRow(ref) {
   tbody.appendChild(tr);
 }
 
+function renderRefsTable(filter) {
+  currentFilter = filter || "all";
+  const tbody = $("resultsBody");
+  tbody.innerHTML = "";
+
+  if (!currentInterestingRefs || !currentInterestingRefs.length) {
+    if (filter === "ok") {
+      const okCount =
+        currentCounts && currentCounts.total
+          ? currentCounts.total
+          : 0;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td colspan="6" style="padding:0.75rem;color:#9ca3af;">OK references (${okCount}) are not listed individually. This table only lists retracted and problematic references.</td>`;
+      tbody.appendChild(tr);
+      return;
+    }
+
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td colspan="6" style="padding:0.75rem;color:#9ca3af;">No retracted or problematic references detected. All references appear OK according to Crossref/PubMed/Retraction Watch (but manual verification is still recommended).</td>';
+    tbody.appendChild(tr);
+    return;
+  }
+
+  if (filter === "ok") {
+    const okCount =
+      currentCounts && currentCounts.total
+        ? currentCounts.total -
+          (currentCounts.retracted +
+            currentCounts.expression_of_concern +
+            currentCounts.withdrawn +
+            currentCounts.problem_no_doi +
+            currentCounts.problem_unknown)
+        : 0;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="6" style="padding:0.75rem;color:#9ca3af;">OK references (${okCount}) are not shown individually. Only retracted and problematic references are listed here.</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+
+  const subset = currentInterestingRefs.filter((r) => {
+    if (filter === "all") return true;
+    if (filter === "retracted") {
+      return (
+        r.status === "retracted" ||
+        r.status === "expression_of_concern" ||
+        r.status === "withdrawn"
+      );
+    }
+    if (filter === "problematic") {
+      return (
+        r.status === "problem_no_doi" || r.status === "problem_unknown"
+      );
+    }
+    return true;
+  });
+
+  if (!subset.length) {
+    const label =
+      filter === "retracted"
+        ? "No retracted/EoC/withdrawn references found."
+        : "No problematic (no DOI / unknown) references found.";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="6" style="padding:0.75rem;color:#9ca3af;">${label}</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+
+  subset.forEach((ref) => appendRefRow(ref));
+}
+
+function setActivePill(activePill) {
+  const summary = $("summary");
+  if (!summary) return;
+  const pills = summary.querySelectorAll(".pill");
+  pills.forEach((p) => {
+    p.classList.toggle("pill--active", p === activePill);
+  });
+}
+
 function renderSummaryPills(counts) {
   const summary = $("summary");
   summary.innerHTML = "";
 
-  function pill(label, value, muted) {
+  function pill(label, value, muted, filter) {
     const div = document.createElement("div");
     div.className =
       "pill pill--static" + (muted ? " pill--muted" : "");
+    div.dataset.filter = filter;
     div.innerHTML = `
       <span class="pill-label">${label}</span>
       <span class="pill-count">${value}</span>
     `;
+    div.addEventListener("click", () => {
+      renderRefsTable(filter);
+      setActivePill(div);
+    });
     return div;
   }
 
@@ -761,25 +942,36 @@ function renderSummaryPills(counts) {
     (counts.problem_no_doi || 0) + (counts.problem_unknown || 0);
   const totalRetLike =
     counts.retracted + counts.expression_of_concern + counts.withdrawn;
+  const totalOk =
+    counts.total - (totalRetLike + totalProblem);
 
-  summary.appendChild(pill("Total references", counts.total, false));
-  summary.appendChild(
-    pill("Retracted / EoC / withdrawn", totalRetLike, totalRetLike === 0)
+  const pillTotal = pill("Total references", counts.total, false, "all");
+  const pillRet = pill(
+    "Retracted / EoC / withdrawn",
+    totalRetLike,
+    totalRetLike === 0,
+    "retracted"
   );
-  summary.appendChild(
-    pill(
-      "Problematic (no DOI / unknown)",
-      totalProblem,
-      totalProblem === 0
-    )
+  const pillProb = pill(
+    "Problematic (no DOI / unknown)",
+    totalProblem,
+    totalProblem === 0,
+    "problematic"
   );
-  summary.appendChild(
-    pill(
-      "OK (not listed below)",
-      counts.total - (totalRetLike + totalProblem),
-      true
-    )
+  const pillOk = pill(
+    "OK (not listed below)",
+    totalOk,
+    true,
+    "ok"
   );
+
+  summary.appendChild(pillTotal);
+  summary.appendChild(pillRet);
+  summary.appendChild(pillProb);
+  summary.appendChild(pillOk);
+
+  // default active: Total
+  setActivePill(pillTotal);
 }
 
 // ==================== CSV EXPORT ====================
@@ -848,6 +1040,22 @@ function setup() {
   const analyzeBtn = $("analyzeBtn");
   const exportBtn = $("exportCsvBtn");
 
+  // Create RW status line (under input card or status area)
+  let rwStatus = $("rwStatus");
+  if (!rwStatus) {
+    const statusEl = $("status");
+    if (statusEl && statusEl.parentNode) {
+      rwStatus = document.createElement("div");
+      rwStatus.id = "rwStatus";
+      rwStatus.className = "rw-status";
+      rwStatus.style.marginTop = "0.25rem";
+      rwStatus.style.fontSize = "0.8rem";
+      rwStatus.style.color = "#9ca3af";
+      statusEl.parentNode.insertBefore(rwStatus, statusEl.nextSibling);
+    }
+  }
+  updateRwStatus();
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const doi = input.value.trim();
@@ -862,6 +1070,7 @@ function setup() {
     } catch (err) {
       console.error(err);
       setStatus("Error: " + err.message, true);
+      finishProgress();
     } finally {
       analyzeBtn.disabled = false;
       exportBtn.disabled = !currentInterestingRefs.length;
@@ -873,4 +1082,3 @@ function setup() {
 
 // Script loaded at end of <body>, so DOM is ready
 setup();
-
