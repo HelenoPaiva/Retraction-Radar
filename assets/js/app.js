@@ -1,7 +1,7 @@
-// Retraction Radar 2.0 – robust version
+// Retraction Radar 2.0 – full app.js
 // - Main article: Crossref + PubMed + Retraction Watch + OpenAlex is_retracted
 // - References: only show retracted and problematic refs, but evaluate all
-// - Mirrors the logic quality of your Apps Script code.gs
+// - Designed to match OpenCitationTrajectory / Anesthesia TOC visual style
 
 // ==================== CONFIG ====================
 
@@ -20,7 +20,7 @@ const RW_CSV_URL =
 let lastAnalyzedDoi = "";
 let currentInterestingRefs = []; // retracted + problematic only
 let currentCounts = null;
-let rwIndexPromise = null;      // Promise<Set<string>>
+let rwIndexPromise = null; // Promise<Set<string>>
 
 // ==================== HELPERS ====================
 
@@ -68,6 +68,16 @@ function normalizeDoi(raw) {
     .replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")
     .replace(/^doi:/i, "")
     .toLowerCase();
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // For ordering: retracted first, then problematic, then others
@@ -482,7 +492,6 @@ async function classifyReferenceFromWork(idx, work) {
   const retInfo = await getCombinedRetractionInfoForDoi(refDoi, !!work.is_retracted);
   let status = retInfo.status;
 
-  // For the purposes of the table, treat "ok" as ignorable; caller will drop it.
   if (!STATUS_SCORE[status]) status = "ok";
 
   return {
@@ -547,12 +556,11 @@ async function analyzeDoi(rawInput) {
 
   // 1) Main article
   const work = await fetchOpenAlexWorkByDoi(doi);
-  const title = work.display_name || "(no title)";
+  const rawTitle = work.display_name || "(no title)";
   const year = work.publication_year || "";
   const workDoi = work.doi || doi;
   const refIds = work.referenced_works || [];
 
-  $("metaTitle").textContent = title;
   $("metaYear").textContent = year || "–";
   $("metaDoi").textContent = workDoi || "–";
   $("metaRefCount").textContent = refIds.length;
@@ -565,22 +573,35 @@ async function analyzeDoi(rawInput) {
     !!work.is_retracted
   );
 
-  let mainStatusHtml = "";
-  if (
+  const isClearlyRetracted =
     mainInfo.status === "retracted" ||
     mainInfo.status === "expression_of_concern" ||
-    mainInfo.status === "withdrawn"
-  ) {
-    mainStatusHtml = statusTag("THIS ARTICLE IS RETRACTED", "status-tag--retracted");
+    mainInfo.status === "withdrawn";
+
+  const metaTitleSpan = $("metaTitle");
+  if (isClearlyRetracted) {
+    const chipHtml = statusTag("RETRACTED", "status-tag--retracted");
+    metaTitleSpan.innerHTML = chipHtml + " " + escapeHtml(rawTitle);
   } else if (mainInfo.status === "corrected") {
-    mainStatusHtml = statusTag("Article has a correction / erratum", "status-tag--clean");
+    const chipHtml = statusTag("CORRECTED / ERRATUM", "status-tag--clean");
+    metaTitleSpan.innerHTML = chipHtml + " " + escapeHtml(rawTitle);
   } else {
-    mainStatusHtml = statusTag(
-      "Article not flagged as retracted",
-      "status-tag--clean"
-    );
+    metaTitleSpan.textContent = rawTitle;
   }
-  if (metaStatusEl) metaStatusEl.innerHTML = mainStatusHtml;
+
+  // Optional secondary line in the meta card
+  if (metaStatusEl) {
+    if (isClearlyRetracted) {
+      metaStatusEl.textContent =
+        "This article itself is retracted or has an expression of concern/withdrawal notice.";
+    } else if (mainInfo.status === "corrected") {
+      metaStatusEl.textContent =
+        "This article has a correction / erratum but is not flagged as fully retracted.";
+    } else {
+      metaStatusEl.textContent =
+        "This article is not flagged as retracted in Crossref/PubMed/Retraction Watch/OpenAlex.";
+    }
+  }
 
   if (!refIds.length) {
     setStatus("OpenAlex: this work lists 0 referenced works.");
@@ -633,8 +654,7 @@ async function analyzeDoi(rawInput) {
   });
 
   const interesting = allRefs.filter(
-    (r) =>
-      r.status !== "ok" // only show retracted/problematic
+    (r) => r.status !== "ok" // only show retracted/problematic
   );
   interesting.sort(compareBySeverity);
 
@@ -658,16 +678,12 @@ async function analyzeDoi(rawInput) {
   summaryWrapper.classList.remove("hidden");
   exportBtn.disabled = currentInterestingRefs.length === 0;
 
-  if (
-    counts.retracted +
-      counts.expression_of_concern +
-      counts.withdrawn >
-    0
-  ) {
+  const totalRetLike =
+    counts.retracted + counts.expression_of_concern + counts.withdrawn;
+
+  if (totalRetLike > 0) {
     setStatus(
-      `Finished. Found ${counts.retracted} retracted and ${
-        counts.expression_of_concern + counts.withdrawn
-      } EoC/withdrawn references; ${
+      `Finished. Found ${totalRetLike} retracted/EoC/withdrawn references; ${
         counts.problem_no_doi + counts.problem_unknown
       } problematic (no DOI / unknown) among ${counts.total} total.`
     );
@@ -743,19 +759,12 @@ function renderSummaryPills(counts) {
 
   const totalProblem =
     (counts.problem_no_doi || 0) + (counts.problem_unknown || 0);
+  const totalRetLike =
+    counts.retracted + counts.expression_of_concern + counts.withdrawn;
 
   summary.appendChild(pill("Total references", counts.total, false));
   summary.appendChild(
-    pill(
-      "Retracted",
-      counts.retracted +
-        counts.expression_of_concern +
-        counts.withdrawn,
-      counts.retracted +
-        counts.expression_of_concern +
-        counts.withdrawn ===
-        0
-    )
+    pill("Retracted / EoC / withdrawn", totalRetLike, totalRetLike === 0)
   );
   summary.appendChild(
     pill(
@@ -767,11 +776,7 @@ function renderSummaryPills(counts) {
   summary.appendChild(
     pill(
       "OK (not listed below)",
-      counts.total -
-        (counts.retracted +
-          counts.expression_of_concern +
-          counts.withdrawn +
-          totalProblem),
+      counts.total - (totalRetLike + totalProblem),
       true
     )
   );
@@ -868,3 +873,4 @@ function setup() {
 
 // Script loaded at end of <body>, so DOM is ready
 setup();
+
