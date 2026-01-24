@@ -1,33 +1,28 @@
-// Retraction Radar 2.0
-// Frontend version inspired by Apps Script code.gs
-// - Uses OpenAlex + Retraction Watch CSV
-// - For a single DOI:
-//     1) Shows main article details + retraction flag
-//     2) Evaluates all references,
-//     3) Renders only:
-//          a) Retracted references
-//          b) Problematic references (no DOI, unknown / fetch errors)
-//     4) Each rendered reference has a detailed citation built from OpenAlex
+// Retraction Radar 2.0 – robust version
+// - Main article: Crossref + PubMed + Retraction Watch + OpenAlex is_retracted
+// - References: only show retracted and problematic refs, but evaluate all
+// - Mirrors the logic quality of your Apps Script code.gs
 
-// -------------------- Config --------------------
+// ==================== CONFIG ====================
 
-const OPENALEX_MAILTO = "name@example.org"; // optional; put your email if you want
+// PubMed API key (yours)
+const PUBMED_API_KEY = "7d653c3573d4967a70f644df87ffbd392708";
 
-// Live Retraction Watch CSV (Crossref / RW dataset)
+// Optional polite parameter for OpenAlex
+const OPENALEX_MAILTO = "name@example.org";
+
+// Retraction Watch CSV (may fail in browser due to CORS; we fail soft)
 const RW_CSV_URL =
   "https://gitlab.com/crossref/retraction-watch-data/-/raw/main/retraction_watch.csv?ref_type=heads";
 
-// OpenAlex batch size (how many referenced works per request)
-const OPENALEX_REF_BATCH_SIZE = 40;
-
-// -------------------- Global state --------------------
+// ==================== GLOBAL STATE ====================
 
 let lastAnalyzedDoi = "";
-let currentInterestingRefs = []; // only retracted + problematic
-let currentCounts = null;        // summary counts for info & pills
-let rwIndexPromise = null;       // Promise<Set<string>> of normalized DOIs from RW CSV
+let currentInterestingRefs = []; // retracted + problematic only
+let currentCounts = null;
+let rwIndexPromise = null;      // Promise<Set<string>>
 
-// -------------------- Small helpers --------------------
+// ==================== HELPERS ====================
 
 function $(id) {
   return document.getElementById(id);
@@ -50,12 +45,19 @@ function mapStatusToTag(status) {
   switch (status) {
     case "retracted":
       return statusTag("RETRACTED", "status-tag--retracted");
+    case "expression_of_concern":
+      return statusTag("EXPRESSION OF CONCERN", "status-tag--eoc");
+    case "withdrawn":
+      return statusTag("WITHDRAWN", "status-tag--eoc");
+    case "corrected":
+      return statusTag("CORRECTED / ERRATUM", "status-tag--clean");
     case "problem_no_doi":
       return statusTag("NO DOI", "status-tag--no-doi");
     case "problem_unknown":
       return statusTag("UNKNOWN", "status-tag--unknown");
+    case "ok":
     default:
-      return statusTag(status.toUpperCase(), "status-tag--clean");
+      return statusTag("OK", "status-tag--clean");
   }
 }
 
@@ -68,9 +70,12 @@ function normalizeDoi(raw) {
     .toLowerCase();
 }
 
-// For severity / sorting: retracted first, then other problems
+// For ordering: retracted first, then problematic, then others
 const STATUS_SCORE = {
-  retracted: 3,
+  retracted: 5,
+  expression_of_concern: 4,
+  withdrawn: 4,
+  corrected: 3,
   problem_no_doi: 2,
   problem_unknown: 1,
   ok: 0,
@@ -79,13 +84,13 @@ const STATUS_SCORE = {
 function compareBySeverity(a, b) {
   const sa = STATUS_SCORE[a.status] ?? 0;
   const sb = STATUS_SCORE[b.status] ?? 0;
-  if (sa !== sb) return sb - sa; // higher first
-  return a.idx - b.idx;          // then by reference index
+  if (sa !== sb) return sb - sa;
+  return a.idx - b.idx;
 }
 
-// -------------------- Retraction Watch CSV --------------------
+// ==================== RETRACTION WATCH CSV ====================
 
-// CSV parser that respects quotes + commas in quoted fields
+// Simple CSV line parser that respects quotes and commas in quoted fields
 function parseCsvLine(line) {
   const cols = [];
   let cur = "";
@@ -116,9 +121,9 @@ function parseRetractionWatchCsv(text) {
   if (!lines.length) return new Set();
 
   const header = parseCsvLine(lines[0]);
-  // In the Apps Script version we used OriginalPaperDOI; here we are more forgiving:
+  // Your Apps Script uses OriginalPaperDOI; we accept that and plain "doi"
   const doiColIndex = header.findIndex((h) => {
-    const t = h.trim().toLowerCase();
+    const t = String(h).trim().toLowerCase();
     return t === "originalpaperdoi" || t === "doi" || t.includes("doi");
   });
 
@@ -155,9 +160,11 @@ function ensureRetractionWatchIndex() {
         return parseRetractionWatchCsv(text);
       })
       .catch((err) => {
-        console.error("Retraction Watch CSV error:", err);
-        // fail soft: empty set => "no matches"
-        return new Set();
+        console.warn(
+          "Retraction Watch CSV could not be loaded (likely CORS or network):",
+          err
+        );
+        return new Set(); // fail soft: acts as "no extra info"
       });
   }
   return rwIndexPromise;
@@ -166,11 +173,10 @@ function ensureRetractionWatchIndex() {
 async function isDoiInRetractionWatch(doi) {
   const index = await ensureRetractionWatchIndex();
   if (!index.size) return false;
-  const key = normalizeDoi(doi);
-  return index.has(key);
+  return index.has(normalizeDoi(doi));
 }
 
-// -------------------- OpenAlex helpers --------------------
+// ==================== OPENALEX ====================
 
 async function fetchOpenAlexWorkByDoi(doi) {
   const normalized = normalizeDoi(doi) || doi.trim();
@@ -183,45 +189,20 @@ async function fetchOpenAlexWorkByDoi(doi) {
   }
 
   const res = await fetch(url);
-  if (res.status === 404) {
-    throw new Error("OpenAlex: DOI not found");
-  }
-  if (!res.ok) {
-    throw new Error("OpenAlex work HTTP " + res.status);
-  }
+  if (res.status === 404) throw new Error("OpenAlex: DOI not found");
+  if (!res.ok) throw new Error("OpenAlex work HTTP " + res.status);
   return res.json();
 }
 
-async function fetchOpenAlexRefsBatch(openAlexIds) {
-  if (!openAlexIds.length) return [];
-  // extract WIDs
-  const widList = openAlexIds
-    .map((id) => {
-      if (!id) return null;
-      const parts = String(id).split("/");
-      return parts[parts.length - 1];
-    })
-    .filter(Boolean);
-
-  if (!widList.length) return [];
-
-  let url =
-    "https://api.openalex.org/works?filter=openalex:" +
-    encodeURIComponent(widList.join("|")) +
-    "&per-page=200&select=id,doi,is_retracted,display_name,publication_year,host_venue,authorships,biblio";
-
+async function fetchOpenAlexWorkById(openAlexId) {
+  const id = String(openAlexId).replace("https://openalex.org/", "");
+  let url = "https://api.openalex.org/works/" + encodeURIComponent(id);
   if (OPENALEX_MAILTO) {
-    url += "&mailto=" + encodeURIComponent(OPENALEX_MAILTO);
+    url += "?mailto=" + encodeURIComponent(OPENALEX_MAILTO);
   }
-
   const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error("OpenAlex refs HTTP " + res.status);
-  }
-
-  const json = await res.json();
-  if (!json || !Array.isArray(json.results)) return [];
-  return json.results;
+  if (!res.ok) throw new Error("OpenAlex ref HTTP " + res.status);
+  return res.json();
 }
 
 function buildCitationFromOpenAlex(work) {
@@ -233,18 +214,18 @@ function buildCitationFromOpenAlex(work) {
   const biblio = work.biblio || {};
   const vol = biblio.volume || "";
   const issue = biblio.issue || "";
-  const firstPage = biblio.first_page || "";
-  const lastPage = biblio.last_page || "";
+  const fp = biblio.first_page || "";
+  const lp = biblio.last_page || "";
   const doi = work.doi || "";
 
-  // authors: first 3
+  // authors (first 3)
   let authors = "";
   if (Array.isArray(work.authorships) && work.authorships.length > 0) {
     const names = work.authorships
       .map((a) =>
         a.author && a.author.display_name ? a.author.display_name : ""
       )
-      .filter((n) => n);
+      .filter(Boolean);
     if (names.length > 3) {
       authors = names.slice(0, 3).join(", ") + " et al.";
     } else {
@@ -259,70 +240,209 @@ function buildCitationFromOpenAlex(work) {
   const yearBits = [];
   if (year) yearBits.push(year);
   if (vol) yearBits.push(vol + (issue ? "(" + issue + ")" : ""));
-  if (firstPage || lastPage) {
-    let pages = firstPage || "";
-    if (lastPage) pages += "-" + lastPage;
+  if (fp || lp) {
+    let pages = fp || "";
+    if (lp) pages += "-" + lp;
     yearBits.push("p. " + pages);
   }
   if (yearBits.length) parts.push(yearBits.join("; "));
   if (doi) parts.push("DOI: " + normalizeDoi(doi));
-
   return parts.join(" ");
 }
 
-// -------------------- Core logic --------------------
+// ==================== CROSSREF ====================
 
-// Decide status for a single referenced work given OpenAlex + Retraction Watch
-async function classifyReference(work, rwIndex) {
-  const idx = work.__idx; // we will assign this manually
-  const refDoi = work.doi || null;
-  const isRetractedOpenAlex = !!work.is_retracted;
+async function fetchCrossrefForDoi(doi) {
+  const url =
+    "https://api.crossref.org/works/" + encodeURIComponent(doi.trim());
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Crossref HTTP " + res.status);
+  const json = await res.json();
+  return json.message || {};
+}
 
+function determineRetractionStatusFromCrossref(message) {
   let status = "ok";
   const notes = [];
-  let viaRW = false;
-  let viaOA = false;
+
+  const updateTo = message["update-to"] || message["update_to"] || [];
+  if (Array.isArray(updateTo) && updateTo.length > 0) {
+    for (const u of updateTo) {
+      const updateType = (u["update-type"] || u["update_type"] || "")
+        .toLowerCase();
+      if (updateType.includes("retract")) {
+        status = "retracted";
+        notes.push("Crossref: update-type = retraction.");
+      } else if (updateType.includes("expression")) {
+        status = "expression_of_concern";
+        notes.push("Crossref: update-type = expression of concern.");
+      } else if (
+        updateType.includes("correction") ||
+        updateType.includes("erratum")
+      ) {
+        if (status === "ok") status = "corrected";
+        notes.push("Crossref: update-type = correction/erratum.");
+      } else if (updateType.includes("withdraw")) {
+        if (status === "ok") status = "withdrawn";
+        notes.push("Crossref: update-type = withdrawal.");
+      }
+    }
+  }
+
+  if (message.relation) {
+    const rel = message.relation;
+    if (rel["is-retracted-by"]) {
+      status = "retracted";
+      notes.push("Crossref relation: is-retracted-by.");
+    } else if (rel["has-retraction"]) {
+      status = "retracted";
+      notes.push("Crossref relation: has-retraction.");
+    }
+  }
+
+  if (status === "ok" && notes.length === 0) {
+    notes.push("Crossref: no retraction/correction signals.");
+  }
+
+  return { status, notes: notes.join(" ") };
+}
+
+async function getCrossrefRetractionInfoForDoi(doi) {
+  try {
+    const msg = await fetchCrossrefForDoi(doi);
+    return determineRetractionStatusFromCrossref(msg);
+  } catch (err) {
+    console.warn("Crossref error for", doi, err);
+    return { status: "unknown", notes: "Crossref error: " + err.message };
+  }
+}
+
+// ==================== PUBMED (E-Utilities) ====================
+
+// 1) DOI → PMID
+async function fetchPubMedIdForDoi(doi) {
+  const term = `${doi.trim()}[DOI]`;
+  const url =
+    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi" +
+    `?db=pubmed&retmode=json&term=${encodeURIComponent(term)}` +
+    `&api_key=${encodeURIComponent(PUBMED_API_KEY)}`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("PubMed esearch HTTP " + res.status);
+  const json = await res.json();
+  const ids = (json.esearchresult && json.esearchresult.idlist) || [];
+  if (!ids.length) return null;
+  return ids[0];
+}
+
+// 2) PMID → summary
+async function fetchPubMedSummaryForPmid(pmid) {
+  const url =
+    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi" +
+    `?db=pubmed&retmode=json&id=${encodeURIComponent(pmid)}` +
+    `&api_key=${encodeURIComponent(PUBMED_API_KEY)}`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("PubMed esummary HTTP " + res.status);
+  const json = await res.json();
+  if (!json.result || !json.result[pmid]) {
+    throw new Error("PubMed esummary: missing result");
+  }
+  return json.result[pmid];
+}
+
+function determineRetractionStatusFromPubMedSummary(pmid, summary) {
+  const pubtypes = summary.pubtype || [];
+  const ptLower = pubtypes.map((p) => String(p).toLowerCase());
+  let status = "ok";
+  const notes = [];
+
+  for (const pt of ptLower) {
+    if (pt.includes("retracted publication")) {
+      status = "retracted";
+      notes.push("PubMed: publication type = Retracted Publication.");
+      break;
+    }
+    if (pt.includes("retraction of publication")) {
+      status = "retracted";
+      notes.push("PubMed: publication type = Retraction of Publication.");
+      break;
+    }
+    if (pt.includes("expression of concern")) {
+      status = "expression_of_concern";
+      notes.push("PubMed: publication type = Expression of Concern.");
+      break;
+    }
+    if (
+      pt.includes("erratum") ||
+      pt.includes("corrigendum") ||
+      pt.includes("correction")
+    ) {
+      if (status === "ok") status = "corrected";
+      notes.push("PubMed: publication type indicates correction/erratum.");
+    }
+  }
+
+  if (status === "ok" && notes.length === 0) {
+    notes.push("PubMed: no retraction-related publication types.");
+  }
+
+  return { status, notes: notes.join(" "), pmid };
+}
+
+async function getPubMedRetractionInfoForDoi(doi) {
+  try {
+    const pmid = await fetchPubMedIdForDoi(doi);
+    if (!pmid) {
+      return {
+        status: "ok",
+        notes: "PubMed: no record found for this DOI.",
+        pmid: null,
+      };
+    }
+    const summary = await fetchPubMedSummaryForPmid(pmid);
+    return determineRetractionStatusFromPubMedSummary(pmid, summary);
+  } catch (err) {
+    console.warn("PubMed error for", doi, err);
+    return { status: "unknown", notes: "PubMed error: " + err.message, pmid: null };
+  }
+}
+
+// ==================== COMBINED STATUS ====================
+
+function pickMoreSevere(a, b) {
+  const sa = STATUS_SCORE[a] ?? 0;
+  const sb = STATUS_SCORE[b] ?? 0;
+  return sa >= sb ? a : b;
+}
+
+async function getCombinedRetractionInfoForDoi(doi, isRetractedOpenAlex) {
+  const [cr, pm, rwHit] = await Promise.all([
+    getCrossrefRetractionInfoForDoi(doi),
+    getPubMedRetractionInfoForDoi(doi),
+    isDoiInRetractionWatch(doi),
+  ]);
+
+  let status = pickMoreSevere(cr.status, pm.status);
+  let notes = [cr.notes, pm.notes].filter(Boolean);
+
+  if (rwHit) {
+    status = pickMoreSevere(status, "retracted");
+    notes.push("Retraction Watch CSV: DOI present.");
+  }
 
   if (isRetractedOpenAlex) {
-    status = "retracted";
-    viaOA = true;
+    status = pickMoreSevere(status, "retracted");
     notes.push("OpenAlex: is_retracted = true.");
   }
 
-  if (refDoi && rwIndex && rwIndex.size) {
-    const norm = normalizeDoi(refDoi);
-    if (rwIndex.has(norm)) {
-      status = "retracted";
-      viaRW = true;
-      notes.push("Retraction Watch CSV: DOI present.");
-    }
-  }
+  if (pm.pmid) notes.push(`PubMed PMID: ${pm.pmid}.`);
 
-  if (!refDoi) {
-    // Only mark as "problem_no_doi" if we *don't* already know it's retracted
-    if (status === "ok") {
-      status = "problem_no_doi";
-      notes.push("No DOI available; cannot consult DOI-based indexes.");
-    }
-  }
-
-  const citation = buildCitationFromOpenAlex(work);
-
-  return {
-    idx,
-    title: work.display_name || "",
-    year: work.publication_year || "",
-    doi: refDoi,
-    openAlexId: work.id || "",
-    status,
-    viaRW,
-    viaOA,
-    notes: notes.join(" "),
-    citation,
-  };
+  return { status, notes: notes.join(" ") };
 }
 
-// classify an "error / missing" reference (OpenAlex error)
+// ==================== REFERENCE CLASSIFIERS ====================
+
 function classifyReferenceError(idx, openAlexId, errorMessage) {
   const shortId = (openAlexId || "").replace("https://openalex.org/", "");
   return {
@@ -332,8 +452,6 @@ function classifyReferenceError(idx, openAlexId, errorMessage) {
     doi: null,
     openAlexId,
     status: "problem_unknown",
-    viaRW: false,
-    viaOA: false,
     notes:
       "Error fetching OpenAlex work for this reference: " +
       (errorMessage || "unknown error"),
@@ -341,17 +459,71 @@ function classifyReferenceError(idx, openAlexId, errorMessage) {
   };
 }
 
-// -------------------- Main analyze flow --------------------
+async function classifyReferenceFromWork(idx, work) {
+  const refDoi = work.doi || null;
+  const citation = buildCitationFromOpenAlex(work);
+  const year = work.publication_year || "";
+  const title = work.display_name || "";
+  const openAlexId = work.id || "";
+
+  if (!refDoi) {
+    return {
+      idx,
+      title,
+      year,
+      doi: null,
+      openAlexId,
+      status: "problem_no_doi",
+      notes: "No DOI available; cannot check Crossref/PubMed/Retraction Watch.",
+      citation,
+    };
+  }
+
+  const retInfo = await getCombinedRetractionInfoForDoi(refDoi, !!work.is_retracted);
+  let status = retInfo.status;
+
+  // For the purposes of the table, treat "ok" as ignorable; caller will drop it.
+  if (!STATUS_SCORE[status]) status = "ok";
+
+  return {
+    idx,
+    title,
+    year,
+    doi: refDoi,
+    openAlexId,
+    status,
+    notes: retInfo.notes,
+    citation,
+  };
+}
+
+// ==================== MAIN ANALYSIS FLOW ====================
+
+function normalizeDoiInput(raw) {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+
+  // Extract from doi.org URL
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    const parts = trimmed.split("doi.org/");
+    if (parts.length > 1) return normalizeDoi(parts[1]);
+  }
+
+  const idx = trimmed.indexOf("10.");
+  if (idx >= 0) return normalizeDoi(trimmed.slice(idx));
+
+  return normalizeDoi(trimmed);
+}
 
 async function analyzeDoi(rawInput) {
-  const doi = normalizeDoi(rawInput);
+  const doi = normalizeDoiInput(rawInput);
   lastAnalyzedDoi = doi || rawInput.trim();
 
   const resultsBody = $("resultsBody");
   const exportBtn = $("exportCsvBtn");
-  const summaryWrapper = $("summaryWrapper");
   const metaInfo = $("metaInfo");
   const metaStatusEl = $("metaStatus");
+  const summaryWrapper = $("summaryWrapper");
 
   currentInterestingRefs = [];
   currentCounts = null;
@@ -368,9 +540,10 @@ async function analyzeDoi(rawInput) {
     return;
   }
 
-  setStatus("Resolving DOI via OpenAlex…");
+  // Preload RW index (best effort) in parallel
+  ensureRetractionWatchIndex().catch(() => {});
 
-  const rwIndex = await ensureRetractionWatchIndex(); // load in parallel early
+  setStatus("Resolving DOI via OpenAlex…");
 
   // 1) Main article
   const work = await fetchOpenAlexWorkByDoi(doi);
@@ -385,155 +558,141 @@ async function analyzeDoi(rawInput) {
   $("metaRefCount").textContent = refIds.length;
   metaInfo.classList.remove("hidden");
 
-  // Main article retraction status (OpenAlex + Retraction Watch)
-  const mainNormDoi = normalizeDoi(workDoi);
-  let mainRetractedOA = !!work.is_retracted;
-  let mainRetractedRW =
-    mainNormDoi && rwIndex && rwIndex.size && rwIndex.has(mainNormDoi);
+  // Combined retraction status for main article
+  setStatus("Checking retraction status of the main article…");
+  const mainInfo = await getCombinedRetractionInfoForDoi(
+    workDoi,
+    !!work.is_retracted
+  );
 
   let mainStatusHtml = "";
-  if (mainRetractedOA || mainRetractedRW) {
+  if (
+    mainInfo.status === "retracted" ||
+    mainInfo.status === "expression_of_concern" ||
+    mainInfo.status === "withdrawn"
+  ) {
     mainStatusHtml = statusTag("THIS ARTICLE IS RETRACTED", "status-tag--retracted");
+  } else if (mainInfo.status === "corrected") {
+    mainStatusHtml = statusTag("Article has a correction / erratum", "status-tag--clean");
   } else {
-    mainStatusHtml = statusTag("Article not flagged as retracted", "status-tag--clean");
+    mainStatusHtml = statusTag(
+      "Article not flagged as retracted",
+      "status-tag--clean"
+    );
   }
-  if (metaStatusEl) {
-    metaStatusEl.innerHTML = mainStatusHtml;
-  }
+  if (metaStatusEl) metaStatusEl.innerHTML = mainStatusHtml;
 
   if (!refIds.length) {
-    setStatus("OpenAlex: this work lists 0 references.");
+    setStatus("OpenAlex: this work lists 0 referenced works.");
     return;
   }
 
   setStatus(
-    `Found ${refIds.length} referenced works. Checking retractions via OpenAlex + Retraction Watch…`
+    `Found ${refIds.length} referenced works. Checking retractions via Crossref/PubMed/Retraction Watch…`
   );
 
-  // 2) References
+  // 2) References (sequential; reliable, avoids HTTP 400)
   const allRefs = [];
   let idxCounter = 0;
 
-  for (let start = 0; start < refIds.length; start += OPENALEX_REF_BATCH_SIZE) {
-    const slice = refIds.slice(start, start + OPENALEX_REF_BATCH_SIZE);
-    let batchWorks = [];
+  for (const refId of refIds) {
+    idxCounter++;
     try {
-      batchWorks = await fetchOpenAlexRefsBatch(slice);
+      const refWork = await fetchOpenAlexWorkById(refId);
+      const refObj = await classifyReferenceFromWork(idxCounter, refWork);
+      allRefs.push(refObj);
     } catch (err) {
-      console.error("Error fetching refs batch:", err);
-      // if the batch fails completely, mark each as problematic
-      slice.forEach((id) => {
-        idxCounter++;
-        allRefs.push(
-          classifyReferenceError(idxCounter, id, err.message || "batch error")
-        );
-      });
-      continue;
+      console.warn("Error fetching reference", refId, err);
+      allRefs.push(
+        classifyReferenceError(idxCounter, refId, err.message || "fetch error")
+      );
     }
 
-    // map from ID → work for quick lookup
-    const mapById = new Map();
-    batchWorks.forEach((w) => {
-      if (w && w.id) {
-        mapById.set(w.id, w);
-      }
-    });
-
-    // keep original order matching refIds
-    for (const refId of slice) {
-      idxCounter++;
-      const w = mapById.get(refId);
-      if (!w) {
-        allRefs.push(
-          classifyReferenceError(
-            idxCounter,
-            refId,
-            "not returned in OpenAlex results"
-          )
-        );
-      } else {
-        w.__idx = idxCounter; // assign index
-        const refObj = await classifyReference(w, rwIndex);
-        allRefs.push(refObj);
-      }
-    }
-
-    if (idxCounter % 20 === 0) {
+    if (idxCounter % 10 === 0) {
       setStatus(
         `Checked ${idxCounter}/${refIds.length} references… still working.`
       );
     }
   }
 
-  // 3) Compute counts and filter interesting refs
+  // 3) Aggregate counts & select interesting refs
   const counts = {
     total: allRefs.length,
     retracted: 0,
+    expression_of_concern: 0,
+    withdrawn: 0,
+    corrected: 0,
     problem_no_doi: 0,
     problem_unknown: 0,
     ok: 0,
   };
 
   allRefs.forEach((r) => {
-    if (r.status in counts) {
-      counts[r.status]++;
-    } else {
-      counts.ok++;
-    }
+    if (counts[r.status] !== undefined) counts[r.status]++;
+    else counts.ok++;
   });
 
   const interesting = allRefs.filter(
-    (r) => r.status !== "ok"
+    (r) =>
+      r.status !== "ok" // only show retracted/problematic
   );
   interesting.sort(compareBySeverity);
 
   currentInterestingRefs = interesting;
   currentCounts = counts;
 
-  // 4) Render table (only interesting refs)
+  // 4) Render table
   resultsBody.innerHTML = "";
 
   if (!interesting.length) {
     const tr = document.createElement("tr");
     tr.innerHTML =
-      '<td colspan="6" style="padding:0.75rem;color:#9ca3af;">No retracted or problematic references detected. All references appear OK according to OpenAlex + Retraction Watch (but manual checking is still recommended).</td>';
+      '<td colspan="6" style="padding:0.75rem;color:#9ca3af;">No retracted or problematic references detected. All references appear OK according to Crossref/PubMed/Retraction Watch (but manual verification is still recommended).</td>';
     resultsBody.appendChild(tr);
   } else {
     interesting.forEach((ref) => appendRefRow(ref));
   }
 
-  // 5) Render summary pills
+  // 5) Summary pills
   renderSummaryPills(counts);
-
-  $("summaryWrapper").classList.remove("hidden");
+  summaryWrapper.classList.remove("hidden");
   exportBtn.disabled = currentInterestingRefs.length === 0;
 
-  if (counts.retracted > 0) {
+  if (
+    counts.retracted +
+      counts.expression_of_concern +
+      counts.withdrawn >
+    0
+  ) {
     setStatus(
-      `Finished. Found ${counts.retracted} retracted references and ${counts.problem_no_doi + counts.problem_unknown} problematic references among ${counts.total} total.`
+      `Finished. Found ${counts.retracted} retracted and ${
+        counts.expression_of_concern + counts.withdrawn
+      } EoC/withdrawn references; ${
+        counts.problem_no_doi + counts.problem_unknown
+      } problematic (no DOI / unknown) among ${counts.total} total.`
     );
   } else {
     setStatus(
-      `Finished. No retracted references detected via OpenAlex/Retraction Watch among ${counts.total} total. ${counts.problem_no_doi + counts.problem_unknown} references are problematic (no DOI / unknown).`
+      `Finished. No retracted or EoC/withdrawn references detected via Crossref/PubMed/Retraction Watch among ${counts.total} total. ${
+        counts.problem_no_doi + counts.problem_unknown
+      } references are problematic (no DOI / unknown).`
     );
   }
 }
 
-// -------------------- Rendering --------------------
+// ==================== RENDERING ====================
 
 function appendRefRow(ref) {
   const tbody = $("resultsBody");
   const tr = document.createElement("tr");
   tr.dataset.status = ref.status;
 
-  // Link: DOI if present; otherwise OpenAlex ID
   let linkHtml = "—";
   if (ref.doi) {
+    const norm = normalizeDoi(ref.doi);
     linkHtml = `<a href="https://doi.org/${encodeURIComponent(
-      normalizeDoi(ref.doi)
-    )}" target="_blank" rel="noopener noreferrer" class="doi-link">${normalizeDoi(
-      ref.doi
-    )}</a>`;
+      norm
+    )}" target="_blank" rel="noopener noreferrer" class="doi-link">${norm}</a>`;
   } else if (ref.openAlexId) {
     const shortId = ref.openAlexId.replace("https://openalex.org/", "");
     linkHtml = `<a href="${ref.openAlexId}" target="_blank" rel="noopener noreferrer" class="doi-link">OpenAlex ${shortId}</a>`;
@@ -571,42 +730,54 @@ function renderSummaryPills(counts) {
   const summary = $("summary");
   summary.innerHTML = "";
 
-  const pills = [];
-
-  function makePill(label, value, subtle) {
-    const btn = document.createElement("div");
-    btn.className = "pill pill--static" + (subtle ? " pill--muted" : "");
-    btn.innerHTML = `
+  function pill(label, value, muted) {
+    const div = document.createElement("div");
+    div.className =
+      "pill pill--static" + (muted ? " pill--muted" : "");
+    div.innerHTML = `
       <span class="pill-label">${label}</span>
       <span class="pill-count">${value}</span>
     `;
-    return btn;
+    return div;
   }
 
-  pills.push(makePill("Total references", counts.total));
-  pills.push(makePill("Retracted", counts.retracted || 0, counts.retracted === 0));
-  pills.push(
-    makePill(
-      "Problematic (no DOI / unknown)",
-      (counts.problem_no_doi || 0) + (counts.problem_unknown || 0),
-      (counts.problem_no_doi || 0) + (counts.problem_unknown || 0) === 0
+  const totalProblem =
+    (counts.problem_no_doi || 0) + (counts.problem_unknown || 0);
+
+  summary.appendChild(pill("Total references", counts.total, false));
+  summary.appendChild(
+    pill(
+      "Retracted",
+      counts.retracted +
+        counts.expression_of_concern +
+        counts.withdrawn,
+      counts.retracted +
+        counts.expression_of_concern +
+        counts.withdrawn ===
+        0
     )
   );
-  pills.push(
-    makePill(
+  summary.appendChild(
+    pill(
+      "Problematic (no DOI / unknown)",
+      totalProblem,
+      totalProblem === 0
+    )
+  );
+  summary.appendChild(
+    pill(
       "OK (not listed below)",
       counts.total -
-        counts.retracted -
-        counts.problem_no_doi -
-        counts.problem_unknown,
+        (counts.retracted +
+          counts.expression_of_concern +
+          counts.withdrawn +
+          totalProblem),
       true
     )
   );
-
-  pills.forEach((p) => summary.appendChild(p));
 }
 
-// -------------------- CSV export --------------------
+// ==================== CSV EXPORT ====================
 
 function exportCurrentToCsv() {
   if (!currentInterestingRefs || !currentInterestingRefs.length) return;
@@ -623,9 +794,7 @@ function exportCurrentToCsv() {
   const rows = [header];
 
   currentInterestingRefs.forEach((r) => {
-    const linkField = r.doi
-      ? normalizeDoi(r.doi)
-      : r.openAlexId || "";
+    const linkField = r.doi ? normalizeDoi(r.doi) : r.openAlexId || "";
     rows.push([
       String(r.idx ?? ""),
       r.status ?? "",
@@ -666,7 +835,7 @@ function exportCurrentToCsv() {
   URL.revokeObjectURL(url);
 }
 
-// -------------------- Wiring --------------------
+// ==================== WIRING ====================
 
 function setup() {
   const form = $("doiForm");
@@ -697,5 +866,5 @@ function setup() {
   exportBtn.addEventListener("click", exportCurrentToCsv);
 }
 
-// Script is loaded at the end of <body>, so DOM is ready
+// Script loaded at end of <body>, so DOM is ready
 setup();
