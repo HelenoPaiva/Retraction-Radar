@@ -1,4 +1,4 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18369380.svg)](https://doi.org/10.5281/zenodo.18369380)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18369379.svg)](https://doi.org/10.5281/zenodo.18369379)
 [![GitHub Pages](https://img.shields.io/badge/live-GitHub%20Pages-brightgreen)](https://helenopaiva.github.io/Retraction-Radar/)
 ![GitHub release](https://img.shields.io/github/v/release/HelenoPaiva/Retraction-Radar)
 ![Last commit](https://img.shields.io/github/last-commit/HelenoPaiva/Retraction-Radar)
