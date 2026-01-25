@@ -9,8 +9,8 @@ abstract: >
   sources.
 
 authors:
-  - family-names: de Paiva Oliveira
-    given-names: Heleno
+  - family-names: Oliveira
+    given-names: Heleno Paiva 
     orcid: https://orcid.org/0000-0001-7335-3438
 
 version: 1.0.0
