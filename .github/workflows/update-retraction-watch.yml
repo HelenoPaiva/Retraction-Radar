@@ -61,7 +61,7 @@ jobs:
           pathlib.Path(os.path.dirname(out_path)).mkdir(parents=True, exist_ok=True)
           with open(out_path, "w", encoding="utf-8") as f:
               for d in sorted(dois):
-                  f.write(d + "\\n")
+                  f.write(d + "\n")
 
           print(f"Wrote {len(dois)} DOIs to {out_path}")
           PY
