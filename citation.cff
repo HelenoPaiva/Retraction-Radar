@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+
+title: "Retraction Radar"
+abstract: >
+  Retraction Radar is a lightweight, reproducible tool for screening
+  reference lists of scholarly articles to identify retracted publications,
+  corrections, and expressions of concern, using open scholarly metadata
+  sources.
+
+authors:
+  - family-names: Oliveira
+    given-names: Heleno de Paiva
+    orcid: https://orcid.org/0000-0001-7335-3438
+
+version: 1.0.0
+date-released: 2026-01-25
+
+doi: 10.5281/zenodo.18369379
+
+url: https://helenopaiva.github.io/Retraction-Radar/
+repository-code: https://github.com/HelenoPaiva/Retraction-Radar
+
+keywords:
+  - retraction
+  - research integrity
+  - citation analysis
+  - systematic review
+  - meta-analysis
+  - scholarly publishing
+
+license: MIT
