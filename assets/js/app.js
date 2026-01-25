@@ -1,9 +1,7 @@
-// Retraction Radar 2.0 – full app.js with:
-// - Main article retraction chip
-// - Citation-level retraction checking
-// - Clickable summary chips for filtering
-// - Progress bar while processing references
-// - Retraction Watch CSV status indicator
+// Retraction Radar 2.0 – app.js using local Retraction Watch DOI index
+// - Main article: Crossref + PubMed + Retraction Watch + OpenAlex is_retracted
+// - References: only show retracted and problematic refs, but evaluate all
+// - Clickable summary chips, progress bar, RW status indicator
 
 // ==================== CONFIG ====================
 
@@ -13,9 +11,8 @@ const PUBMED_API_KEY = "7d653c3573d4967a70f644df87ffbd392708";
 // Optional polite parameter for OpenAlex
 const OPENALEX_MAILTO = "name@example.org";
 
-// Retraction Watch CSV (remote; may be mirrored later)
-const RW_CSV_URL =
-  "https://gitlab.com/crossref/retraction-watch-data/-/raw/main/retraction_watch.csv?ref_type=heads";
+// Local Retraction Watch DOI index (updated by GitHub Action)
+const RW_INDEX_URL = "data/retraction_watch_doi_index.txt";
 
 // ==================== GLOBAL STATE ====================
 
@@ -107,63 +104,7 @@ function compareBySeverity(a, b) {
   return a.idx - b.idx;
 }
 
-// ==================== RETRACTION WATCH CSV ====================
-
-// Simple CSV line parser that respects quotes and commas in quoted fields
-function parseCsvLine(line) {
-  const cols = [];
-  let cur = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (c === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (c === "," && !inQuotes) {
-      cols.push(cur);
-      cur = "";
-    } else {
-      cur += c;
-    }
-  }
-  cols.push(cur);
-  return cols;
-}
-
-function parseRetractionWatchCsv(text) {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
-  if (!lines.length) return new Set();
-
-  const header = parseCsvLine(lines[0]);
-  // Try OriginalPaperDOI first, then any DOI-like column
-  const doiColIndex = header.findIndex((h) => {
-    const t = String(h).trim().toLowerCase();
-    return t === "originalpaperdoi" || t === "doi" || t.includes("doi");
-  });
-
-  if (doiColIndex === -1) {
-    console.warn("Retraction Watch CSV: DOI column not found");
-    return new Set();
-  }
-
-  const seen = new Set();
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim()) continue;
-    const cols = parseCsvLine(line);
-    if (doiColIndex >= cols.length) continue;
-    const rawDoi = cols[doiColIndex];
-    if (!rawDoi) continue;
-    const norm = normalizeDoi(rawDoi);
-    if (norm) seen.add(norm);
-  }
-  return seen;
-}
+// ==================== RETRACTION WATCH INDEX ====================
 
 function updateRwStatus() {
   let el = $("rwStatus");
@@ -185,7 +126,7 @@ function ensureRetractionWatchIndex() {
     rwIndexMeta = { loaded: false, size: 0, error: null };
     updateRwStatus();
 
-    rwIndexPromise = fetch(RW_CSV_URL)
+    rwIndexPromise = fetch(RW_INDEX_URL)
       .then((res) => {
         if (!res.ok) {
           throw new Error("HTTP " + res.status);
@@ -193,12 +134,18 @@ function ensureRetractionWatchIndex() {
         return res.text();
       })
       .then((text) => {
-        const set = parseRetractionWatchCsv(text);
+        const set = new Set();
+        // Handle any format: one big line, newlines, commas, spaces, etc.
+        const tokens = text.split(/[\s,;]+/);
+        for (const t of tokens) {
+          const norm = normalizeDoi(t);
+          if (norm) set.add(norm);
+        }
         rwIndexMeta.loaded = true;
         rwIndexMeta.size = set.size;
         rwIndexMeta.error = null;
         updateRwStatus();
-        console.log("Retraction Watch CSV loaded with", set.size, "entries");
+        console.log("Retraction Watch DOI index loaded with", set.size, "entries");
         return set;
       })
       .catch((err) => {
@@ -206,10 +153,7 @@ function ensureRetractionWatchIndex() {
         rwIndexMeta.size = 0;
         rwIndexMeta.error = err.message || String(err);
         updateRwStatus();
-        console.warn(
-          "Retraction Watch CSV could not be loaded (likely CORS/network):",
-          err
-        );
+        console.warn("Retraction Watch index could not be loaded:", err);
         return new Set(); // fail soft
       });
   }
@@ -474,7 +418,7 @@ async function getCombinedRetractionInfoForDoi(doi, isRetractedOpenAlex) {
 
   if (rwHit) {
     status = pickMoreSevere(status, "retracted");
-    notes.push("Retraction Watch CSV: DOI present.");
+    notes.push("Retraction Watch index: DOI present.");
   }
 
   if (isRetractedOpenAlex) {
@@ -614,7 +558,6 @@ function normalizeDoiInput(raw) {
   if (!raw) return "";
   const trimmed = raw.trim();
 
-  // Extract from doi.org URL
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
     const parts = trimmed.split("doi.org/");
     if (parts.length > 1) return normalizeDoi(parts[1]);
@@ -863,15 +806,15 @@ function renderRefsTable(filter) {
   }
 
   if (filter === "ok") {
+    const totalRetLike =
+      currentCounts.retracted +
+      currentCounts.expression_of_concern +
+      currentCounts.withdrawn;
+    const totalProblem =
+      currentCounts.problem_no_doi + currentCounts.problem_unknown;
     const okCount =
-      currentCounts && currentCounts.total
-        ? currentCounts.total -
-          (currentCounts.retracted +
-            currentCounts.expression_of_concern +
-            currentCounts.withdrawn +
-            currentCounts.problem_no_doi +
-            currentCounts.problem_unknown)
-        : 0;
+      currentCounts.total - (totalRetLike + totalProblem);
+
     const tr = document.createElement("tr");
     tr.innerHTML = `<td colspan="6" style="padding:0.75rem;color:#9ca3af;">OK references (${okCount}) are not shown individually. Only retracted and problematic references are listed here.</td>`;
     tbody.appendChild(tr);
@@ -970,8 +913,7 @@ function renderSummaryPills(counts) {
   summary.appendChild(pillProb);
   summary.appendChild(pillOk);
 
-  // default active: Total
-  setActivePill(pillTotal);
+  setActivePill(pillTotal); // default
 }
 
 // ==================== CSV EXPORT ====================
@@ -1040,7 +982,7 @@ function setup() {
   const analyzeBtn = $("analyzeBtn");
   const exportBtn = $("exportCsvBtn");
 
-  // Create RW status line (under input card or status area)
+  // RW status line
   let rwStatus = $("rwStatus");
   if (!rwStatus) {
     const statusEl = $("status");
