@@ -1,7 +1,7 @@
 name: Update Retraction Watch DOI index
 
 on:
-  # Daily update (01:30 UTC). Adjust as needed.
+  # Daily update (03:30 UTC). Adjust as needed.
   schedule:
     - cron: '30 1 * * *'
   # Manual trigger from Actions tab
@@ -41,6 +41,24 @@ jobs:
               s = re.sub(r"^doi:", "", s, flags=re.I)
               return s.lower()
 
+          def is_plausible_doi(s: str) -> bool:
+              """
+              Keep only strings that *look* like real DOIs:
+              - start with '10.'
+              - no spaces
+              - not placeholders like 'unavailable', 'na', etc.
+              """
+              if not s:
+                  return False
+              s = s.strip().lower()
+              if not s.startswith("10."):
+                  return False
+              if " " in s:
+                  return False
+              if s in {"unavailable", "na", "n/a"}:
+                  return False
+              return True
+
           dois = set()
 
           with open(in_path, newline="", encoding="utf-8") as f:
@@ -55,7 +73,7 @@ jobs:
                   if not val:
                       continue
                   norm = normalize_doi(val)
-                  if norm:
+                  if is_plausible_doi(norm):
                       dois.add(norm)
 
           pathlib.Path(os.path.dirname(out_path)).mkdir(parents=True, exist_ok=True)
