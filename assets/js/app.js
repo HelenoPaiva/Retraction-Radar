@@ -167,7 +167,9 @@ function ensureRetractionWatchIndex() {
         const tokens = text.split(/[\s,;]+/);
         for (const t of tokens) {
           const norm = normalizeDoi(t);
-          if (norm) set.add(norm);
+          if (norm && norm.startsWith("10.")) {
+            set.add(norm);
+          }
         }
         rwIndexMeta.loaded = true;
         rwIndexMeta.size = set.size;
