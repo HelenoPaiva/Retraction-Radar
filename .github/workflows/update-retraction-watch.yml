@@ -1,0 +1,77 @@
+name: Update Retraction Watch DOI index
+
+on:
+  # Weekly update (Monday 03:00 UTC). Adjust as you like.
+  schedule:
+    - cron: '0 3 * * 1'
+  # Allow manual trigger from Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download latest retraction_watch.csv
+        run: |
+          mkdir -p /tmp
+          curl -L \
+            "https://gitlab.com/crossref/retraction-watch-data/-/raw/main/retraction_watch.csv?ref_type=heads" \
+            -o /tmp/retraction_watch.csv
+
+      - name: Build DOI index file
+        run: |
+          mkdir -p data
+          python << 'EOF'
+          import csv, re, os
+
+          in_path = "/tmp/retraction_watch.csv"
+          out_path = "data/retraction_watch_doi_index.txt"
+
+          def normalize_doi(s: str) -> str:
+              s = s.strip()
+              if not s:
+                  return ""
+              s = re.sub(r"^https?://(dx\.)?doi\.org/", "", s, flags=re.I)
+              s = re.sub(r"^doi:", "", s, flags=re.I)
+              return s.lower()
+
+          dois = set()
+          with open(in_path, newline="", encoding="utf-8") as f:
+              reader = csv.DictReader(f)
+              for row in reader:
+                  val = (
+                      row.get("OriginalPaperDOI")
+                      or row.get("originalpaperdoi")
+                      or row.get("DOI")
+                      or row.get("doi")
+                  )
+                  if not val:
+                      continue
+                  norm = normalize_doi(val)
+                  if norm:
+                      dois.add(norm)
+
+          os.makedirs(os.path.dirname(out_path), exist_ok=True)
+          with open(out_path, "w", encoding="utf-8") as f:
+              for d in sorted(dois):
+                  f.write(d + "\n")
+          EOF
+
+      - name: Commit and push if index changed
+        run: |
+          if git diff --quiet; then
+            echo "No changes in retraction_watch_doi_index.txt"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/retraction_watch_doi_index.txt
+          git commit -m "chore: update Retraction Watch DOI index"
+          git push
