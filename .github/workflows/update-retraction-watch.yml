@@ -3,7 +3,7 @@ name: Update Retraction Watch DOI index
 on:
   # Weekly update (Monday 03:00 UTC). Adjust as you like.
   schedule:
-    - cron: '30 3 * * *'
+    - cron: '0 3 * * 1'
   # Allow manual trigger from Actions tab
   workflow_dispatch:
 
@@ -27,21 +27,22 @@ jobs:
       - name: Build DOI index file
         run: |
           mkdir -p data
-          python << 'EOF'
-          import csv, re, os
+          python - << 'PY'
+          import csv, re, os, pathlib
 
           in_path = "/tmp/retraction_watch.csv"
           out_path = "data/retraction_watch_doi_index.txt"
 
           def normalize_doi(s: str) -> str:
-              s = s.strip()
               if not s:
                   return ""
+              s = s.strip()
               s = re.sub(r"^https?://(dx\.)?doi\.org/", "", s, flags=re.I)
               s = re.sub(r"^doi:", "", s, flags=re.I)
               return s.lower()
 
           dois = set()
+
           with open(in_path, newline="", encoding="utf-8") as f:
               reader = csv.DictReader(f)
               for row in reader:
@@ -57,11 +58,19 @@ jobs:
                   if norm:
                       dois.add(norm)
 
-          os.makedirs(os.path.dirname(out_path), exist_ok=True)
+          pathlib.Path(os.path.dirname(out_path)).mkdir(parents=True, exist_ok=True)
           with open(out_path, "w", encoding="utf-8") as f:
               for d in sorted(dois):
-                  f.write(d + "\n")
-          EOF
+                  f.write(d + "\\n")
+
+          print(f"Wrote {len(dois)} DOIs to {out_path}")
+          PY
+
+      - name: Show generated file (debug)
+        run: |
+          ls -lh data
+          echo "First 5 lines of data/retraction_watch_doi_index.txt:"
+          head -n 5 data/retraction_watch_doi_index.txt || echo "FILE MISSING"
 
       - name: Commit and push if index changed
         run: |
