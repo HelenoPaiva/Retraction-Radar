@@ -1,10 +1,10 @@
 name: Update Retraction Watch DOI index
 
 on:
-  # Weekly update (Monday 03:00 UTC). Adjust as you like.
+  # Daily update (01:30 UTC). Adjust as needed.
   schedule:
-    - cron: '0 3 * * 1'
-  # Allow manual trigger from Actions tab
+    - cron: '30 1 * * *'
+  # Manual trigger from Actions tab
   workflow_dispatch:
 
 permissions:
@@ -68,19 +68,22 @@ jobs:
 
       - name: Show generated file (debug)
         run: |
-          ls -lh data
+          ls -lh data || echo "no data dir"
           echo "First 5 lines of data/retraction_watch_doi_index.txt:"
           head -n 5 data/retraction_watch_doi_index.txt || echo "FILE MISSING"
 
       - name: Commit and push if index changed
         run: |
-          if git diff --quiet; then
+          # Stage the file first so new files are tracked
+          git add data/retraction_watch_doi_index.txt
+
+          # If nothing in the index differs from HEAD, bail out
+          if git diff --cached --quiet; then
             echo "No changes in retraction_watch_doi_index.txt"
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/retraction_watch_doi_index.txt
           git commit -m "chore: update Retraction Watch DOI index"
           git push
