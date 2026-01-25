@@ -14,66 +14,88 @@ https://helenopaiva.github.io/Retraction-Radar/
 Given a DOI (or DOI URL), Retraction Radar:
 
 1. Resolves the article in **OpenAlex** and retrieves its reference list.
-2. Fetches metadata for each cited work (title, year, DOI).
-3. Checks each DOI in **Crossref** for update signals (retractions, corrections,
-   expressions of concern, withdrawals).
-4. Displays an interactive table with:
-   - Status labels
-   - Filtering pills (Total, Retracted, No DOI, Unknown, etc.)
+2. Fetches metadata for each cited work.
+3. Checks cited records against **Crossref** update metadata and the
+   **Retraction Watch** database.
+4. Displays an interactive table with filters and status flags.
 5. Allows exporting the full results as a **CSV file**.
 
-The goal is to quickly identify references that warrant **manual review**.
+The goal is to rapidly identify references that warrant **manual review**.
 
 ---
 
 ## Why this exists
 
-Meta-analyses and systematic reviews can become unreliable when included studies
-are later retracted or seriously corrected. There is no simple, unified way to
-periodically screen reference lists for these events.
+Systematic reviews and meta-analyses can become unreliable when included studies
+are later retracted or substantially corrected. There is no simple, unified way
+to periodically screen reference lists for these events.
 
-Retraction Radar provides a fast, transparent way to:
-- Scan an article’s references for potential problems
+Retraction Radar provides a fast and transparent way to:
+- Scan an article’s references for potential integrity issues
 - Document findings via CSV export
 - Support editorial, reviewer, and author re-evaluation
 
-It does **not** replace critical appraisal or editorial judgement.
+It does **not** replace critical appraisal or editorial judgment.
 
 ---
 
-## How to use
+## How to use the Retraction Radar webpage
 
 1. Open the live site:  
    https://helenopaiva.github.io/Retraction-Radar/
 2. Paste a DOI or DOI URL.
 3. Click **Analyze**.
-4. Review flagged references and export results if needed.
+4. Review flagged references using the interactive table.
+5. Export the results as a CSV if needed.
+
+The webpage is a static, client-side tool (no backend).  
+Results reflect the metadata available at the time of analysis.
 
 ---
 
-## Data sources (brief)
+## How to use the Google Sheets script (`code.gs`)
 
-- **OpenAlex** – reference lists and basic metadata  
-- **Crossref** – update metadata (retractions, corrections, expressions of concern)
+The repository includes a Google Sheets script (`code.gs`) designed to work with
+large citation datasets inside **Google Sheets**, integrating multiple scholarly
+data sources.
 
-Each cited paper is classified as:
-**OK**, **Retracted**, **Expression of concern**, **Corrected / Erratum**,
-**Withdrawn**, **No DOI**, or **Unknown**.
+### Workflow
+
+1. Run a literature search (e.g. PubMed or similar).
+2. Export the **entire search result** as a **CSV** file.
+3. Upload the CSV to **Google Sheets**.
+4. In Google Sheets, open:  
+   `Extensions → Apps Script`
+5. Paste the contents of `code.gs` into the editor and save.
+6. Run the main function and authorize the script when prompted.
+7. The script will retrieve and reconcile metadata from:
+   - OpenAlex
+   - Crossref
+   - Retraction Watch  
+   and populate structured tables in the spreadsheet.
+
+This workflow is intended for:
+- Large or repeated searches
+- Metadata normalization
+- Offline or auditable citation screening
+
+Authorization is required only on first use.
+
+---
+
+## Data sources
+
+- **OpenAlex** – reference lists and general scholarly metadata  
+- **Crossref** – update metadata (retractions, corrections, withdrawals)  
+- **Retraction Watch** – curated database of retracted and problematic publications  
 
 ---
 
 ## Limitations
 
-- Depends on OpenAlex and Crossref metadata accuracy.
-- References without DOIs cannot be checked in Crossref.
-- Results reflect a **single point in time**; re-checking is recommended.
-
----
-
-## Local use
-
-This is a static site (no backend).  
-Clone the repository and open `index.html` in a browser.
+- Dependent on the completeness and accuracy of external metadata sources.
+- References without stable identifiers may not be fully resolved.
+- Results represent a **single point in time**; periodic re-checking is recommended.
 
 ---
 
@@ -81,5 +103,5 @@ Clone the repository and open `index.html` in a browser.
 
 Developed and maintained by  
 **Heleno de Paiva Oliveira, MD, PhD**  
-Anesthesiology Professor  
+Professor of Anesthesiology  
 Universidade Federal do Rio Grande do Norte (UFRN)
