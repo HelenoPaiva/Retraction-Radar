@@ -24,9 +24,14 @@ let currentFilter = "all";
 let rwIndexPromise = null; // Promise<Set<string>>
 let rwIndexMeta = { loaded: false, size: 0, error: null };
 
-// progress bar state
+// progress bar state (per-reference checking)
 let totalRefsForProgress = 0;
 let processedRefsForProgress = 0;
+
+// Analyze button state
+let analyzeBtnGlobal = null;
+let analyzeReady = false; // RW index has finished loading (success or fail)
+let analyzeBusy = false;  // currently processing a DOI
 
 // ==================== HELPERS ====================
 
@@ -102,6 +107,29 @@ function compareBySeverity(a, b) {
   const sb = STATUS_SCORE[b.status] ?? 0;
   if (sa !== sb) return sb - sa;
   return a.idx - b.idx;
+}
+
+// ==================== ANALYZE BUTTON CONTROL ====================
+
+function refreshAnalyzeButton() {
+  if (!analyzeBtnGlobal) return;
+  const enabled = analyzeReady && !analyzeBusy;
+  analyzeBtnGlobal.disabled = !enabled;
+
+  if (!enabled) {
+    // Greyed-out appearance while disabled
+    if (!analyzeBtnGlobal.dataset.originalBg) {
+      const cs = window.getComputedStyle(analyzeBtnGlobal);
+      analyzeBtnGlobal.dataset.originalBg = cs.backgroundColor || "";
+    }
+    analyzeBtnGlobal.style.filter = "grayscale(60%)";
+    analyzeBtnGlobal.style.opacity = "0.6";
+    analyzeBtnGlobal.style.cursor = "not-allowed";
+  } else {
+    analyzeBtnGlobal.style.filter = "";
+    analyzeBtnGlobal.style.opacity = "";
+    analyzeBtnGlobal.style.cursor = "";
+  }
 }
 
 // ==================== RETRACTION WATCH INDEX ====================
@@ -486,7 +514,7 @@ async function classifyReferenceFromWork(idx, work) {
   };
 }
 
-// ==================== PROGRESS BAR ====================
+// ==================== PROGRESS BAR (PER-REFERENCE) ====================
 
 function ensureProgressBarDom() {
   let wrapper = $("progressBarWrapper");
@@ -594,9 +622,6 @@ async function analyzeDoi(rawInput) {
     setStatus("Please enter a DOI.", true);
     return;
   }
-
-  // Preload RW index (best effort) in parallel
-  ensureRetractionWatchIndex().catch(() => {});
 
   setStatus("Resolving DOI via OpenAlex…");
 
@@ -982,6 +1007,11 @@ function setup() {
   const analyzeBtn = $("analyzeBtn");
   const exportBtn = $("exportCsvBtn");
 
+  analyzeBtnGlobal = analyzeBtn;
+  analyzeReady = false;
+  analyzeBusy = false;
+  refreshAnalyzeButton();
+
   // RW status line
   let rwStatus = $("rwStatus");
   if (!rwStatus) {
@@ -998,12 +1028,20 @@ function setup() {
   }
   updateRwStatus();
 
+  // Start loading Retraction Watch index immediately
+  ensureRetractionWatchIndex()
+    .finally(() => {
+      analyzeReady = true; // even if error; we still allow analysis
+      refreshAnalyzeButton();
+    });
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const doi = input.value.trim();
     if (!doi) return;
 
-    analyzeBtn.disabled = true;
+    analyzeBusy = true;
+    refreshAnalyzeButton();
     exportBtn.disabled = true;
     setStatus("");
 
@@ -1014,7 +1052,8 @@ function setup() {
       setStatus("Error: " + err.message, true);
       finishProgress();
     } finally {
-      analyzeBtn.disabled = false;
+      analyzeBusy = false;
+      refreshAnalyzeButton();
       exportBtn.disabled = !currentInterestingRefs.length;
     }
   });
