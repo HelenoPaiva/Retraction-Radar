@@ -1,7 +1,9 @@
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18369379-blue)](https://doi.org/10.5281/zenodo.18369379)
-[![GitHub Pages](https://img.shields.io/badge/live-GitHub%20Pages-brightgreen)](https://helenopaiva.github.io/Retraction-Radar/)  
+[![GitHub Pages](https://img.shields.io/badge/live-GitHub%20Pages-brightgreen)](https://helenopaiva.github.io/Retraction-Radar/)
 [![GitHub release](https://img.shields.io/github/v/release/HelenoPaiva/Retraction-Radar)](https://github.com/HelenoPaiva/Retraction-Radar/releases/tag/v1.0.0)
 ![Last commit](https://img.shields.io/github/last-commit/HelenoPaiva/Retraction-Radar)
+![License](https://img.shields.io/github/license/HelenoPaiva/Retraction-Radar)
+
 
 
 # Retraction Radar
