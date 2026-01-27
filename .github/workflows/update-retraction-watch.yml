@@ -3,7 +3,7 @@ name: Update Retraction Watch DOI index
 on:
   # updates every 10 minutes. Adjust as needed.
   schedule:
-    - cron: '0/10 * * * *'
+    - cron: '*/10 * * * *'
   # Manual trigger from Actions tab
   workflow_dispatch:
 
