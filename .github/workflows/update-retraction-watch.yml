@@ -1,9 +1,10 @@
 name: Update Retraction Watch DOI index
 
 on:
-  # updates every 10 minutes. Adjust as needed.
+  # Runs every 15 minutes(adjust as needed).
+  # You *can* change this to '*/10 * * * *', but GitHub may not run it exactly every 10 minutes.
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/15 * * * *'
   # Manual trigger from Actions tab
   workflow_dispatch:
 
