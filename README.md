@@ -107,6 +107,33 @@ Authorization is required only on first use.
 
 ---
 
+## Maintaining the Retraction Watch DOI index
+
+The scheduled workflow downloads the source CSV and runs
+`scripts/build_retraction_watch_index.py`. The export can contain a mixture of
+UTF-8 and legacy-encoded text in titles, institutions, and other unused metadata.
+The reader preserves undecodable bytes with `surrogateescape` instead of guessing
+an encoding or dropping bytes; DOI fields must be valid UTF-8. UTF-8 BOMs,
+quoted commas, and multiline CSV fields are supported.
+
+Before replacing the index atomically, the builder checks the CSV schema, row
+widths, DOI encoding, and nonempty output. It also stops if more than 5% of the
+previous index's DOIs would disappear. Investigate the source export before
+changing that safeguard. Download, parsing, validation, or write failures leave
+the previous index intact.
+
+Run the regression suite with Python 3.10 or newer:
+
+```sh
+python -m unittest discover -s tests -v
+python scripts/build_retraction_watch_index.py /path/to/retraction_watch.csv data/retraction_watch_doi_index.txt
+```
+
+Pull-request checks run the tests and build from the live export without
+committing or publishing the generated index.
+
+---
+
 ## Author
 
 Developed and maintained by  

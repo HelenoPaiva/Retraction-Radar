@@ -1,0 +1,31 @@
+name: Test Retraction Watch DOI index
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/*retraction-watch.yml'
+      - 'scripts/build_retraction_watch_index.py'
+      - 'tests/test_retraction_watch_index.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Validate the live export without publishing
+        run: |
+          curl --fail --location --show-error --retry 3 --connect-timeout 30 --max-time 180 \
+            "https://gitlab.com/crossref/retraction-watch-data/-/raw/main/retraction_watch.csv?ref_type=heads" \
+            -o /tmp/retraction_watch.csv
+          python scripts/build_retraction_watch_index.py /tmp/retraction_watch.csv data/retraction_watch_doi_index.txt
+          git diff --stat -- data/retraction_watch_doi_index.txt
