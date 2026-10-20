@@ -79,6 +79,13 @@ class IndexTests(unittest.TestCase):
     def test_invalid_doi_encoding_is_not_replaced_or_dropped(self):
         self.assert_rejected_without_replacing(b"Title,OriginalPaperDOI\nA,10.1234/bad\x92\n")
 
+    def test_late_failure_does_not_publish_partial_results(self):
+        for last_row in (b"B,10.1234/bad\x92\n", b'"unfinished,10.1234/b\n'):
+            with self.subTest(last_row=last_row):
+                self.assert_rejected_without_replacing(
+                    b"Title,DOI\nA,10.1234/previous\n" + last_row
+                )
+
     def test_control_character_in_doi(self):
         self.assert_rejected_without_replacing(b'Title,OriginalPaperDOI\nA,"10.1234/a\nb"\n')
 
@@ -113,6 +120,14 @@ class IndexTests(unittest.TestCase):
         self.write_csv([("A", f"10.1234/{i}") for i in range(95)])
         self.assertEqual(build_index(self.source, self.destination), (95, 95))
 
+    def test_new_dois_do_not_mask_large_loss_of_old_dois(self):
+        original = "".join(f"10.1234/{i}\n" for i in range(100))
+        self.destination.write_text(original)
+        self.write_csv([("A", f"10.1234/{i}") for i in range(10, 120)])
+        with self.assertRaisesRegex(ValueError, "5%"):
+            build_index(self.source, self.destination)
+        self.assertEqual(self.destination.read_text(), original)
+
     def test_replace_failure_preserves_previous_index_and_cleans_temporary_file(self):
         original = b"10.1234/a\n"
         self.destination.write_bytes(original)
@@ -123,7 +138,7 @@ class IndexTests(unittest.TestCase):
         self.assertEqual(self.destination.read_bytes(), original)
         self.assertEqual(sorted(p.name for p in self.destination.parent.iterdir()), ["index.txt", "input.csv"])
 
-    def test_write_failure_preserves_previous_index(self):
+    def test_fsync_failure_preserves_previous_index(self):
         original = b"10.1234/a\n"
         self.destination.write_bytes(original)
         self.write_csv([("A", "10.1234/a")])
