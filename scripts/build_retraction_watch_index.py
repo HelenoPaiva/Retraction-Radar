@@ -29,8 +29,14 @@ def read_dois(source: Path) -> tuple[set[str], int]:
         headers = next(reader, [])
         if not headers or any(not name.isascii() for name in headers):
             raise ValueError("Missing or invalid CSV header")
+        # The October 2026 upstream export adds one empty terminal field.
+        # Accept it only as padding: never discard an unnamed data column.
+        expected_width = len(headers)
+        trailing_padding = headers[-1] == ""
+        if trailing_padding:
+            headers = headers[:-1]
         headers = [name.strip().lower() for name in headers]
-        if len(headers) != len(set(headers)) or any(not name for name in headers):
+        if not headers or len(headers) != len(set(headers)) or any(not name for name in headers):
             raise ValueError("Empty or duplicate CSV columns")
         doi_columns = [headers.index(name) for name in ("originalpaperdoi", "doi") if name in headers]
         if not doi_columns:
@@ -40,10 +46,12 @@ def read_dois(source: Path) -> tuple[set[str], int]:
             if not row:  # csv.DictReader also skips empty physical lines.
                 continue
             rows += 1
-            if len(row) != len(headers):
+            if len(row) != expected_width:
                 raise ValueError(f"Wrong column count at CSV line {reader.line_num}")
             if any("\x00" in value for value in row):
                 raise ValueError(f"NUL byte at CSV line {reader.line_num}")
+            if trailing_padding and row[-1] != "":
+                raise ValueError(f"Nonempty unnamed trailing column at CSV line {reader.line_num}")
             values = [row[column] for column in doi_columns]
             for value in values:
                 try:

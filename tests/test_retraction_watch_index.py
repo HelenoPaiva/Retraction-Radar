@@ -66,6 +66,39 @@ class IndexTests(unittest.TestCase):
         self.write_csv([('First, "second"\nthird', "10.1234/a")])
         self.assertEqual(read_dois(self.source), ({"10.1234/a"}, 1))
 
+    def test_single_empty_trailing_column(self):
+        self.write_csv([('First, "second"\nthird', "10.1234/A", ""),
+                        ("Other", "10.1234/b", "")],
+                       encoding="utf-8-sig", header=("Title", "OriginalPaperDOI", ""))
+        self.assertEqual(build_index(self.source, self.destination), (2, 2))
+        self.assertEqual(self.destination.read_bytes(), b"10.1234/a\n10.1234/b\n")
+
+    def test_unnamed_column_must_be_single_exact_empty_terminal_header(self):
+        for header in (b",DOI", b"Title,,DOI", b"Title,DOI,,", b"Title,DOI, ",
+                       b"Title,DOI,doi,", b","):
+            with self.subTest(header=header):
+                self.assert_rejected_without_replacing(header + b"\n")
+                # Ensure rejection is schema-specific, not just empty-input rejection.
+                with self.assertRaisesRegex(ValueError, "Empty or duplicate CSV columns"):
+                    read_dois(self.source)
+
+    def test_trailing_padding_must_be_present_and_exactly_empty(self):
+        for last_row in (b"B,10.1234/b,x\n", b"B,10.1234/b, \n",
+                         b"B,10.1234/b,\x00\n", b"B,10.1234/b,\x92\n",
+                         b"B,10.1234/b\n", b"B,10.1234/b,,\n"):
+            with self.subTest(last_row=last_row):
+                self.assert_rejected_without_replacing(
+                    b"Title,DOI,\nA,10.1234/previous,\n" + last_row
+                )
+
+    def test_padding_does_not_relax_doi_encoding_or_loss_guard(self):
+        for data, error in ((b"Title,DOI,\nA,10.1234/bad\x92,\n", "Undecodable DOI"),
+                            (b"Title,DOI,\nA,10.1234/new,\n", "5%")):
+            with self.subTest(data=data):
+                self.assert_rejected_without_replacing(data)
+                with self.assertRaisesRegex(ValueError, error):
+                    build_index(self.source, self.destination)
+
     def test_doi_alias_and_original_precedence(self):
         self.write_csv([("", "10.1234/fallback"), ("10.1234/original", "10.1234/ignored")],
                        header=("originalpaperdoi", "DOI"))
