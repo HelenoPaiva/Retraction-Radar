@@ -114,7 +114,10 @@ The scheduled workflow downloads the source CSV and runs
 UTF-8 and legacy-encoded text in titles, institutions, and other unused metadata.
 The reader preserves undecodable bytes with `surrogateescape` instead of guessing
 an encoding or dropping bytes; DOI fields must be valid UTF-8. UTF-8 BOMs,
-quoted commas, and multiline CSV fields are supported.
+quoted commas, and multiline CSV fields are supported. The October 2026 export's
+single unnamed trailing column is accepted only when its header and every row's
+corresponding field are exactly empty. Other blank or duplicate column names,
+nonempty trailing fields, and inconsistent row widths still fail validation.
 
 Before replacing the index atomically, the builder checks the CSV schema, row
 widths, DOI encoding, and nonempty output. It also stops if more than 5% of the
